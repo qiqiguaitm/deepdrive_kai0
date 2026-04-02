@@ -41,16 +41,26 @@
 
 `can_activate.sh` 工作原理: 根据 USB bus-info 找到对应的物理 `canX` 接口 → 设置 bitrate → 重命名为指定符号名 → 激活。
 
-### sim01 当前 CAN 接口 (2026-04-01 实测)
+### sim01 当前 CAN 接口 (2026-04-02 calibrate_can_mapping.py 校准)
 
-| 物理接口 | USB Bus-Info | 符号名 (launch 期望) | 角色 |
-|----------|-------------|---------------------|------|
-| can0 | `1-2.4:1.0` | `can_left_mas` | 左臂 master |
-| can1 | `1-2.3:1.0` | `can_left_slave` | 左臂 slave |
-| can2 | `1-2.2:1.0` | `can_right_mas` | 右臂 master |
-| can3 | `1-2.1:1.0` | `can_right_slave` | 右臂 slave |
+| USB Bus-Info | 符号名 (launch 期望) | 角色 |
+|-------------|---------------------|------|
+| `3-2.1.2:1.0` | `can_left_mas` | 左臂 master |
+| `3-2.1.1:1.0` | `can_left_slave` | 左臂 slave |
+| `3-2.1.3:1.0` | `can_right_mas` | 右臂 master |
+| `3-2.1.4:1.0` | `can_right_slave` | 右臂 slave |
 
-4 个 USB-CAN 适配器均已接入，遥操和 DAgger 就绪。
+映射由 `piper_tools/calibrate_can_mapping.py` 交互式校准，结果保存在 `piper_tools/activate_can.sh` 和 `config/pipers.yml`。
+
+### CAN 工具链 (`piper_tools/`)
+
+| 脚本 | 用途 |
+|------|------|
+| `find_n_activate.sh` | 扫描并激活所有 CAN 接口 (随机分配 canX 名称) |
+| `calibrate_can_mapping.py` | 交互式校准: 晃臂检测 CAN-臂映射关系 |
+| `activate_can.sh` | 按已有映射重命名为符号名并激活 (支持 `--slave-only`) |
+| `verify_can_mapping.py` | 实时监控: 晃臂验证映射是否正确 |
+| `diagnose_can.sh` | CAN 接口诊断 |
 
 ### 查看 / 确认 bus-info
 
@@ -101,50 +111,58 @@ done
 
 人操控 master 臂，slave 臂实时跟随。用于初始数据采集或调试。
 
+完整快速操作流程另见 [teleop_quickstart.md](teleop_quickstart.md)。
+
 ### 前置条件
 
-- 4 个 USB-CAN 适配器均已连接 (2 master + 2 slave)
-- master 臂和 slave 臂均已上电
+- 4 个 USB-CAN 适配器均已连接到 IPC (2 master + 2 slave)
+- 4 个 Piper 臂均已上电
+- 3 个 RealSense 相机已连接 (1× D435 俯视 + 2× D405 腕部)
 
 ### 操作步骤
 
 ```bash
-# 1. 用 can_activate.sh 将物理接口重命名为符号名
-#    (bus-info 需根据实际硬件填写, 首次接入时用 ethtool 确认)
-cd ~/workspace/deepdive_kai0/kai0/train_deploy_alignment/dagger/agilex
+# 1. 确认 CAN 适配器已被系统识别
+lsusb | grep -i can          # 应看到 4 个 CAN 设备
+ip -br link show type can    # 应看到 4 个 canX 接口
 
-bash ./can_activate.sh can_left_mas    1000000 "1-2.4:1.0"   # can0 → 左 master
-bash ./can_activate.sh can_left_slave  1000000 "1-2.3:1.0"   # can1 → 左 slave
-bash ./can_activate.sh can_right_mas   1000000 "1-2.2:1.0"   # can2 → 右 master
-bash ./can_activate.sh can_right_slave 1000000 "1-2.1:1.0"   # can3 → 右 slave
+# 2. 激活 CAN 接口 (扫描 + 设置波特率 + UP, 接口名随机分配)
+cd ~/workspace/deepdive_kai0/piper_tools
+bash find_n_activate.sh
 
-# 或者一次性执行 (需先更新 activate_can_arms.sh 中的 bus-info):
-bash ./activate_can_arms.sh
+# 3. 首次接入 / USB 口变动时: 交互式校准 CAN-臂映射
+#    依次晃动指定的臂, 脚本自动检测对应接口并保存映射
+python calibrate_can_mapping.py
 
-# 2. 验证符号名接口均已就绪
-ip link show type can
-# 应看到 can_left_slave, can_right_slave, can_left_mas, can_right_mas 均为 UP
+# 4. 按映射重命名 CAN 接口为 ROS2 launch 期望的符号名
+bash activate_can.sh
+# 输出末尾会验证各接口 UP 并检测数据流
 
-# 3. 验证 CAN 数据流
-candump can_left_slave -n 5 &
-candump can_right_slave -n 5 &
-candump can_left_mas -n 5 &
-candump can_right_mas -n 5 &
-wait
-# 每个接口应收到数据帧, 否则检查对应臂是否上电
+# 5a. 验证 CAN-臂映射正确性 (晃动各臂确认 <<< MOVING 标记与预期一致)
+python verify_can_mapping.py
+# Ctrl+C 退出
 
-# 4. 启动 ROS2 Master-Slave 节点
-cd ~/workspace/deepdive_kai0/ros2_ws
-source install/setup.bash
-ros2 launch piper start_ms_piper_new_launch.py
+# 5b. 验证相机正常: 打开 realsense-viewer 确认 3 个相机画面和序列号
+realsense-viewer
+# 核对: D435 (254622070889) = top_head
+#        D405 (409122273074) = hand_left
+#        D405 (409122271568) = hand_right
+
+# 6. 启动遥操
+cd ~/workspace/deepdive_kai0/scripts
+bash start_teleop.sh
 ```
 
 启动后 master 臂进入拖拽示教模式，拖动 master 臂，slave 臂会实时跟随。
+
+> **提示**: Step 3 校准结果会自动写入 `piper_tools/activate_can.sh` 和 `config/pipers.yml`。
+> USB 口未变动时可跳过 Step 3，直接从 Step 4 开始。
 
 ### 验证
 
 ```bash
 # 另开终端, 检查 topic 是否有数据
+source ~/workspace/deepdive_kai0/ros2_ws/install/setup.bash
 ros2 topic hz /master/joint_left     # 应 ~200 Hz
 ros2 topic hz /puppet/joint_left     # 应 ~200 Hz
 ros2 topic echo /puppet/joint_left   # 查看关节角度
@@ -238,16 +256,12 @@ HDF5 格式:
 
 ## 场景三：纯策略推理 (无遥操)
 
-仅需 slave 臂, 无需 master 臂。可以直接使用物理接口名 (`can1`, `can2`)，
-因为 `inference_full_launch.py` 硬编码了 `can1`/`can2`。
+仅需 slave 臂, 无需 master 臂。
 
 ```bash
-# 1. 激活 slave CAN (无需重命名)
-for iface in can1 can2; do
-  sudo ip link set "$iface" down
-  sudo ip link set "$iface" type can bitrate 1000000
-  sudo ip link set "$iface" up
-done
+# 1. 激活 slave CAN (仅重命名 2 个 slave 接口)
+cd ~/workspace/deepdive_kai0/piper_tools
+bash activate_can.sh --slave-only
 
 # 2. 启动推理服务
 cd ~/workspace/deepdive_kai0/kai0
@@ -317,8 +331,10 @@ bash can_activate.sh <符号名> 1000000 "<bus-info>"
 | `ros2_ws/src/piper/launch/inference_full_launch.py` | 纯推理启动 (2 slave can1/can2 + 3 相机) |
 | `ros2_ws/src/piper/scripts/piper_start_ms_node_new.py` | MS 节点实现 (模式切换, 使能, 拖拽示教) |
 | `ros2_ws/src/piper/scripts/policy_inference_node.py` | ROS2 策略推理节点 (3 种模式) |
-| `kai0/train_deploy_alignment/dagger/agilex/can_activate.sh` | 单个 CAN 接口重命名+激活脚本 |
-| `kai0/train_deploy_alignment/dagger/agilex/activate_can_arms.sh` | 批量激活 4 臂 (需更新 bus-info) |
+| `piper_tools/find_n_activate.sh` | 扫描+随机激活所有 CAN 接口 |
+| `piper_tools/calibrate_can_mapping.py` | 交互式 CAN-臂映射校准 |
+| `piper_tools/activate_can.sh` | 按映射重命名+激活 (支持 `--slave-only`) |
+| `piper_tools/verify_can_mapping.py` | 实时 CAN-臂映射验证 |
 | `kai0/train_deploy_alignment/dagger/agilex/agilex_openpi_dagger_collect_ros2.py` | DAgger 采集 (ROS2) |
 | `kai0/train_deploy_alignment/dagger/agilex/collect_data_ros2.py` | 独立数据录制 (ROS2) |
 | `kai0/scripts/serve_policy.py` | WebSocket 策略推理服务 |
