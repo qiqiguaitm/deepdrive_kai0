@@ -88,12 +88,33 @@ def grab_frame(serial: str, width=640, height=480) -> tuple[np.ndarray, np.ndarr
     # 对齐深度到彩色
     align = rs.align(rs.stream.color)
 
+    # Depth post-processing filters
+    spatial = rs.spatial_filter()
+    spatial.set_option(rs.option.filter_magnitude, 2)
+    spatial.set_option(rs.option.filter_smooth_alpha, 0.5)
+    spatial.set_option(rs.option.filter_smooth_delta, 20)
+    temporal = rs.temporal_filter()
+    temporal.set_option(rs.option.filter_smooth_alpha, 0.4)
+    temporal.set_option(rs.option.filter_smooth_delta, 20)
+    hole_filling = rs.hole_filling_filter()
+
+    # Warm up + feed temporal filter
     for _ in range(30):
-        pipeline.wait_for_frames(timeout_ms=3000)
+        frames = pipeline.wait_for_frames(timeout_ms=3000)
+        aligned = align.process(frames)
+        depth_frame = aligned.get_depth_frame()
+        depth_frame = spatial.process(depth_frame)
+        depth_frame = temporal.process(depth_frame)
+
+    # Final capture
     frames = pipeline.wait_for_frames(timeout_ms=3000)
     aligned = align.process(frames)
     bgr = np.asanyarray(aligned.get_color_frame().get_data())
-    depth = np.asanyarray(aligned.get_depth_frame().get_data())
+    depth_frame = aligned.get_depth_frame()
+    depth_frame = spatial.process(depth_frame)
+    depth_frame = temporal.process(depth_frame)
+    depth_frame = hole_filling.process(depth_frame)
+    depth = np.asanyarray(depth_frame.get_data())
     # 对齐后深度使用彩色流内参
     color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
     cintr = color_stream.get_intrinsics()
@@ -390,6 +411,17 @@ def main():
 
         # Realtime update loop
         print("\n--- 实时更新 (Ctrl+C 退出) ---")
+
+        def _make_depth_filters():
+            spatial = rs.spatial_filter()
+            spatial.set_option(rs.option.filter_magnitude, 2)
+            spatial.set_option(rs.option.filter_smooth_alpha, 0.5)
+            spatial.set_option(rs.option.filter_smooth_delta, 20)
+            temporal = rs.temporal_filter()
+            temporal.set_option(rs.option.filter_smooth_alpha, 0.4)
+            temporal.set_option(rs.option.filter_smooth_delta, 20)
+            return spatial, temporal
+
         # Keep persistent camera pipelines for realtime streaming
         live_cams = {}
         for label, serial, intr, T_world_cam in cameras:
@@ -401,7 +433,8 @@ def main():
                 config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
                 pipeline.start(config)
                 align = rs.align(rs.stream.color)
-                live_cams[label] = (pipeline, align, T_world_cam, None, None, None)
+                filters = _make_depth_filters()
+                live_cams[label] = (pipeline, align, T_world_cam, None, filters)
             except Exception as e:
                 print(f"  [WARN] {label} camera not available for live: {e}")
 
@@ -417,7 +450,8 @@ def main():
                 color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
                 cintr = color_stream.get_intrinsics()
                 depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
-                live_cams[arm_label] = (pipeline, align, None, (T_link6_cam, T_world_base, piper, cintr, depth_scale), None, None)
+                filters = _make_depth_filters()
+                live_cams[arm_label] = (pipeline, align, None, (T_link6_cam, T_world_base, piper, cintr, depth_scale), filters)
             except Exception as e:
                 print(f"  [WARN] {arm_label} camera not available for live: {e}")
 
@@ -491,13 +525,17 @@ def main():
 
                     # Update wrist camera point cloud
                     if arm_label in live_cams:
-                        pipeline, align, _, arm_info, _, _ = live_cams[arm_label]
+                        pipeline, align, _, arm_info, filters = live_cams[arm_label]
                         T_link6_cam_a, T_world_base_a, piper_a, cintr, depth_scale = arm_info
+                        spatial_f, temporal_f = filters
                         try:
                             frames = pipeline.wait_for_frames(timeout_ms=100)
                             aligned = align.process(frames)
                             bgr = np.asanyarray(aligned.get_color_frame().get_data())
-                            depth = np.asanyarray(aligned.get_depth_frame().get_data())
+                            depth_frame = aligned.get_depth_frame()
+                            depth_frame = spatial_f.process(depth_frame)
+                            depth_frame = temporal_f.process(depth_frame)
+                            depth = np.asanyarray(depth_frame.get_data())
                             T_ee = fk.fk_homogeneous(q_rad)
                             T_w_cam = T_base @ T_ee @ np.array(T_link6_cam_a)
                             pc, colors = depth_to_pointcloud(
@@ -514,12 +552,16 @@ def main():
 
                 # Update head camera point cloud
                 if 'head' in live_cams:
-                    pipeline, align, T_world_cam, _, _, _ = live_cams['head']
+                    pipeline, align, T_world_cam, _, filters = live_cams['head']
+                    spatial_f, temporal_f = filters
                     try:
                         frames = pipeline.wait_for_frames(timeout_ms=100)
                         aligned = align.process(frames)
                         bgr = np.asanyarray(aligned.get_color_frame().get_data())
-                        depth = np.asanyarray(aligned.get_depth_frame().get_data())
+                        depth_frame = aligned.get_depth_frame()
+                        depth_frame = spatial_f.process(depth_frame)
+                        depth_frame = temporal_f.process(depth_frame)
+                        depth = np.asanyarray(depth_frame.get_data())
                         profile = pipeline.get_active_profile()
                         cs = profile.get_stream(rs.stream.color).as_video_stream_profile()
                         ci = cs.get_intrinsics()
