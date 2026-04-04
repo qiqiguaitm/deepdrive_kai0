@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 # -*-coding:utf8-*-
 # ROS2 Jazzy version of piper_read_master_node.py
 # 本文件为读取主臂发送的消息，当机械臂设置为主臂，主臂只发送关节角消息和控制指令

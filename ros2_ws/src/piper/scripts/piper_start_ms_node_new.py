@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 # -*-coding:utf8-*-
 # ROS2 Jazzy version of piper_start_ms_node_new.py
 # 本文件为同时打开主从臂的节点，通过mode参数控制是读取还是控制

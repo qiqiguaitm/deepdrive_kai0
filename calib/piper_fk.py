@@ -7,13 +7,33 @@ Piper 机械臂正运动学 (FK) 封装
 SDK 位置: /home/tim/workspace/piper_sdk/piper_sdk/kinematics/piper_fk.py
 DH offset: 0x01 (j2/j3 含 2° 校正, 与实际硬件匹配)
 """
+import os
 import sys
 import math
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-sys.path.insert(0, '/home/tim/workspace/piper_sdk')
-from piper_sdk.kinematics.piper_fk import C_PiperForwardKinematics
+# Locate piper_sdk: env var > ~/workspace/piper_sdk > hardcoded fallback
+_PIPER_SDK_DIR = os.environ.get('PIPER_SDK_DIR', '')
+if not _PIPER_SDK_DIR or not os.path.isdir(_PIPER_SDK_DIR):
+    for candidate in [
+        os.path.join(os.path.expanduser('~'), 'workspace', 'piper_sdk'),
+        '/home/tim/workspace/piper_sdk',
+    ]:
+        if os.path.isdir(os.path.join(candidate, 'piper_sdk', 'kinematics')):
+            _PIPER_SDK_DIR = candidate
+            break
+if _PIPER_SDK_DIR and _PIPER_SDK_DIR not in sys.path:
+    sys.path.insert(0, _PIPER_SDK_DIR)
+# Import the kinematics module directly via importlib to avoid piper_sdk/__init__.py
+# which transitively imports `can` (python-can) — not needed for FK and not available
+# under the system Python used by ROS2 nodes.
+import importlib.util as _ilu
+_fk_path = os.path.join(_PIPER_SDK_DIR, 'piper_sdk', 'kinematics', 'piper_fk.py')
+_fk_spec = _ilu.spec_from_file_location('piper_sdk.kinematics.piper_fk', _fk_path)
+_fk_mod = _ilu.module_from_spec(_fk_spec)
+_fk_spec.loader.exec_module(_fk_mod)
+C_PiperForwardKinematics = _fk_mod.C_PiperForwardKinematics
 
 
 class PiperFK:
@@ -30,12 +50,14 @@ class PiperFK:
 
     def __init__(self, dh_is_offset: int = 0x01):
         self._fk = C_PiperForwardKinematics(dh_is_offset=dh_is_offset)
-        # 检测 SDK 内部 API 是否可用
+        # 检测 SDK 内部 API 是否可用 (包括 name-mangled 私有方法)
         self._use_internal_api = (
             hasattr(self._fk, '_theta')
             and hasattr(self._fk, '_alpha')
             and hasattr(self._fk, '_a')
             and hasattr(self._fk, '_d')
+            and hasattr(self._fk, '_C_PiperForwardKinematics__LinkTransformtion')
+            and hasattr(self._fk, '_C_PiperForwardKinematics__MatMultiply')
         )
         if not self._use_internal_api:
             print("[PiperFK] SDK internal API not available, using CalFK fallback")
@@ -119,9 +141,7 @@ class PiperFK:
         all_ok = True
         for name, q in test_configs:
             T_internal = self._cal_fk_matrices(q)[-1]
-            self._use_internal_api = False
             T_calFK = self._cal_fk_via_calFK(q)[-1]
-            self._use_internal_api = True
 
             t_err_mm = np.linalg.norm(T_internal[:3, 3] - T_calFK[:3, 3]) * 1000
             R_err_deg = np.degrees(np.arccos(np.clip(

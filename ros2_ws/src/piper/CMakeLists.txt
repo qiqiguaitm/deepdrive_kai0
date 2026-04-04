@@ -11,6 +11,8 @@ install(PROGRAMS
   scripts/piper_start_master_node_debug.py
   scripts/piper_read_master_node.py
   scripts/policy_inference_node.py
+  scripts/rerun_viz_node.py
+  scripts/multi_camera_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

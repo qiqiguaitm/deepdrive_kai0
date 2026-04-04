@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 # ROS2 Jazzy version of piper_start_master_node_debug.py
 

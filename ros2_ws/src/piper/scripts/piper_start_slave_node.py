@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 # -*-coding:utf8-*-
 # ROS2 Jazzy version of piper_start_slave_node.py
 # 本文件为打开从臂控制
