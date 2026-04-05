@@ -2,7 +2,7 @@
 # CAN 接口完整配置流程
 #
 # 用法:
-#   bash can_tools/setup_can.sh           # 完整流程 (扫描→激活→校准→重命名)
+#   bash can_tools/setup_can.sh           # 完整流程 (扫描→激活→校准→重命名→校验)
 #   bash can_tools/setup_can.sh --quick   # 跳过校准, 使用已有映射直接激活
 #
 # 流程:
@@ -10,6 +10,7 @@
 #   Step 2: 激活所有接口 (临时名 canX)
 #   Step 3: 交互式校准映射关系 (晃动臂检测)
 #   Step 4: 按校准结果重命名为符号名并激活
+#   Step 5: 交互式校验映射 (verify_can_mapping.py)
 
 set -eo pipefail
 
@@ -154,6 +155,21 @@ done
 
 # 用更新后的配置重命名
 bash "$SCRIPT_DIR/activate_can.sh"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 5: 校验映射 (verify_can_mapping.py)
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "━━━ Step 5: 校验映射 ━━━"
+echo ""
+echo "接下来运行 verify_can_mapping.py, 依次晃动每个臂,"
+echo "核对哪个接口标记 '<<< MOVING' 是否与预期符号名一致。"
+echo "完成后按 Ctrl+C 退出校验。"
+echo ""
+read -r -p "按 Enter 开始校验, 或输入 s 跳过: " _ans
+if [[ "${_ans:-}" != "s" && "${_ans:-}" != "S" ]]; then
+    python3 "$SCRIPT_DIR/verify_can_mapping.py" || true
+fi
 
 echo ""
 echo "============================================"
