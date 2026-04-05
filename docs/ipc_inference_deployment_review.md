@@ -23,7 +23,7 @@ kai0 子仓库有 5 个文件被修改 (不含 uv.lock):
 
 ### 风险 1 (高): Launch 文件中相机 topic 路径不一致
 
-`inference_full_launch.py:146-148` 配置的 topic:
+`autonomy_launch.py:146-148` 配置的 topic:
 
 ```
 /camera_f/camera/color/image_raw   <- 多了 /camera/ 中间层
@@ -58,9 +58,9 @@ kai0 子仓库有 5 个文件被修改 (不含 uv.lock):
 | 部署方式 | Piper mode | 行为 |
 |----------|-----------|------|
 | 原版 `start_inference.sh` | `mode:=1 auto_enable:=true` | 控制模式, 订阅 `/master/joint_states` 并驱动从臂 |
-| ROS2 `inference_full_launch.py` | `mode: 0, auto_enable: False` | 只读模式, 只发布关节状态, **不接受控制命令** |
+| ROS2 `autonomy_launch.py` | `mode: 0, auto_enable: False` | 只读模式, 只发布关节状态, **不接受控制命令** |
 
-`piper_start_ms_node.py` 中:
+`arm_reader_node.py` 中:
 - `mode=0`: 同时发布 puppet 和 master joint states, **不订阅控制命令**
 - `mode=1`: 订阅 `/master/joint_states` 并控制从臂
 

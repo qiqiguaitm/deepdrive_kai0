@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
-# ROS2 Jazzy version of piper_start_master_node_debug.py
+# Standalone master-handle controller node.
+# Exposes enable / teach-mode / master-slave linkage switching over ROS topics
+# for a single teach-handle arm (e.g. can_left_mas).
 
 import rclpy
 from rclpy.node import Node
@@ -17,7 +19,7 @@ class MasterArmController(Node):
         super().__init__('master_arm_controller_test')
 
         # Parameters
-        self.declare_parameter('can_port', 'can_left_master')
+        self.declare_parameter('can_port', 'can_left_mas')
         self.declare_parameter('control_rate', 10)
 
         # 连接到独立的主臂CAN接口

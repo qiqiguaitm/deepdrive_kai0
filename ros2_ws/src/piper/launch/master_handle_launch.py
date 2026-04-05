@@ -1,7 +1,7 @@
-"""ROS2 launch file for start_master_aloha_debug.
+"""ROS2 launch file for standalone master-handle controller.
 
-Converted from ROS1 start_master_aloha_debug.launch.
-Launches a standalone master arm controller for debugging.
+Launches a single master_handle_node for one teach-handle arm, exposing
+enable / teach-mode / master-slave-linkage switching over topics.
 """
 
 from launch import LaunchDescription
@@ -13,7 +13,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     # Declare arguments
     can_port_arg = DeclareLaunchArgument(
-        'can_port', default_value='can_left_master',
+        'can_port', default_value='can_left_mas',
         description='CAN port for the master arm'
     )
     control_rate_arg = DeclareLaunchArgument(
@@ -28,7 +28,7 @@ def generate_launch_description():
     # Master arm controller node
     master_arm_controller = Node(
         package='piper',
-        executable='piper_start_master_node_debug.py',
+        executable='master_handle_node.py',
         name='master_arm_controller',
         output='screen',
         respawn=False,

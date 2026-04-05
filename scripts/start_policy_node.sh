@@ -4,10 +4,10 @@
 # 合并自: test_policy_both_mode.sh + test_policy_ros2_mode.sh
 #
 # Usage:
-#   ./scripts/launch_policy_node.sh             # 默认 mode=both
-#   ./scripts/launch_policy_node.sh --mode ros2
-#   ./scripts/launch_policy_node.sh --mode both
-#   ./scripts/launch_policy_node.sh --mode websocket
+#   ./scripts/start_policy_node.sh             # 默认 mode=both
+#   ./scripts/start_policy_node.sh --mode ros2
+#   ./scripts/start_policy_node.sh --mode both
+#   ./scripts/start_policy_node.sh --mode websocket
 set -e
 
 MODE="both"

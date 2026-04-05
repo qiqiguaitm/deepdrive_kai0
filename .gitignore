@@ -63,6 +63,8 @@ coverage.xml
 *.log
 .env
 .envrc
+# Orphan numpy dumps from ad-hoc debugging
+scripts/*.npy
 
 # ===== Docker =====
 docker/*.tar

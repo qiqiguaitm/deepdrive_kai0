@@ -37,8 +37,8 @@ CAMERAS = {
 
 # ─── CAN 配置 ────────────────────────────────────────────────────────────────
 CAN_ARMS = {
-    "Piper 左臂 (slave)": "can1",
-    "Piper 右臂 (slave)": "can2",
+    "Piper 左臂 (slave)": "can_left_slave",
+    "Piper 右臂 (slave)": "can_right_slave",
 }
 
 results = {}
@@ -326,7 +326,7 @@ def test_can_raw_stats():
     """CAN 总线统计"""
     section("Test 3: CAN 总线统计")
 
-    for iface in ["can0", "can1", "can2"]:
+    for iface in ["can_left_mas", "can_left_slave", "can_right_mas", "can_right_slave"]:
         try:
             out = subprocess.run(
                 ["ip", "-s", "link", "show", iface],

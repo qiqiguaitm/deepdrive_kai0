@@ -1,10 +1,11 @@
 #!/usr/bin/python3
 # -*-coding:utf8-*-
-# ROS2 Jazzy version of piper_start_ms_node_new.py
-# 本文件为同时打开主从臂的节点，通过mode参数控制是读取还是控制
-# 默认认为从臂有夹爪
-# mode为0时为发送主从臂消息，
-# mode为1时为控制从臂，不发送主臂消息，此时如果要控制从臂，需要给主臂的topic发送消息
+# Active teleop arm node (master/slave split-CAN topology).
+# mode=0: physical teach-handle side. Initializes MasterSlaveConfig(0xFA),
+#         auto-homes, exposes runtime linkage/teach-mode switching. WARNING:
+#         actively moves the arm at init. Use only on can_*_mas interfaces.
+# mode=1: physical executor side. Subscribes to /master/joint_states and
+#         drives the arm. Use on can_*_slave interfaces.
 from typing import (
     Optional,
 )

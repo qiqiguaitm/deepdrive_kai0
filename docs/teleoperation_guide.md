@@ -111,8 +111,6 @@ done
 
 人操控 master 臂，slave 臂实时跟随。用于初始数据采集或调试。
 
-完整快速操作流程另见 [teleop_quickstart.md](teleop_quickstart.md)。
-
 ### 前置条件
 
 - 4 个 USB-CAN 适配器均已连接到 IPC (2 master + 2 slave)
@@ -197,7 +195,7 @@ CUDA_VISIBLE_DEVICES=0 uv run python scripts/serve_policy.py \
 ```bash
 cd ~/workspace/deepdive_kai0/ros2_ws
 source install/setup.bash
-ros2 launch piper start_ms_piper_new_launch.py
+ros2 launch piper teleop_launch.py
 ```
 
 **Terminal 3 — DAgger 采集脚本**
@@ -273,7 +271,7 @@ CUDA_VISIBLE_DEVICES=0 uv run python scripts/serve_policy.py \
 # 3. 启动 ROS2 推理节点
 cd ~/workspace/deepdive_kai0/ros2_ws
 source install/setup.bash
-ros2 launch piper inference_full_launch.py
+ros2 launch piper autonomy_launch.py
 ```
 
 推理节点参数:
@@ -327,9 +325,9 @@ bash can_activate.sh <符号名> 1000000 "<bus-info>"
 
 | 文件 | 说明 |
 |------|------|
-| `ros2_ws/src/piper/launch/start_ms_piper_new_launch.py` | Master-Slave 启动 (4 臂, 使用符号名) |
-| `ros2_ws/src/piper/launch/inference_full_launch.py` | 纯推理启动 (2 slave can1/can2 + 3 相机) |
-| `ros2_ws/src/piper/scripts/piper_start_ms_node_new.py` | MS 节点实现 (模式切换, 使能, 拖拽示教) |
+| `ros2_ws/src/piper/launch/teleop_launch.py` | Master-Slave 启动 (4 臂, 使用符号名) |
+| `ros2_ws/src/piper/launch/autonomy_launch.py` | 纯推理启动 (2 slave can1/can2 + 3 相机) |
+| `ros2_ws/src/piper/scripts/arm_teleop_node.py` | MS 节点实现 (模式切换, 使能, 拖拽示教) |
 | `ros2_ws/src/piper/scripts/policy_inference_node.py` | ROS2 策略推理节点 (3 种模式) |
 | `piper_tools/find_n_activate.sh` | 扫描+随机激活所有 CAN 接口 |
 | `piper_tools/calibrate_can_mapping.py` | 交互式 CAN-臂映射校准 |

@@ -1,7 +1,7 @@
 # 在线推理可视化与交互执行控制
 
 > 日期: 2026-04-04
-> 修改文件: `policy_inference_node.py`, `inference_full_launch.py`
+> 修改文件: `policy_inference_node.py`, `autonomy_launch.py`
 > 依赖: rerun-sdk, trimesh, scipy, piper_fk
 
 ---
@@ -204,19 +204,19 @@ policy.infer(obs) → actions[50, 14]
 ### 6.1 观测模式 + Rerun (默认不动臂)
 
 ```bash
-ros2 launch piper inference_full_launch.py enable_rerun:=true
+ros2 launch piper autonomy_launch.py enable_rerun:=true
 ```
 
 ### 6.2 执行模式 + Rerun
 
 ```bash
-ros2 launch piper inference_full_launch.py enable_rerun:=true execute_mode:=true
+ros2 launch piper autonomy_launch.py enable_rerun:=true execute_mode:=true
 ```
 
 ### 6.3 不带 Rerun (原有行为)
 
 ```bash
-ros2 launch piper inference_full_launch.py mode:=ros2
+ros2 launch piper autonomy_launch.py mode:=ros2
 ```
 
 ### 6.4 运行中切换

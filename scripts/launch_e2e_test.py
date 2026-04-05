@@ -1,12 +1,12 @@
 """
 端到端推理测试 Launch — Piper (mode=0 只读) + 3 相机
 
-piper 以 mode=0 启动: 只发布关节状态，不接受控制命令 → 安全，不会控制臂运动。
-推理脚本发布的动作命令无接收者 → 不产生任何运动。
+piper 以 mode=0 启动 (arm_reader_node 被动读取模式): 只发布关节状态，不接受
+控制命令 → 安全，不会控制臂运动。推理脚本发布的动作命令无接收者 → 不产生任何运动。
 
 Topic 映射:
-  /puppet/joint_left   ← piper 左臂关节反馈 (can1)
-  /puppet/joint_right  ← piper 右臂关节反馈 (can2)
+  /puppet/joint_left   ← piper 左臂关节反馈 (can_left_slave)
+  /puppet/joint_right  ← piper 右臂关节反馈 (can_right_slave)
   /camera_f/color/image_raw  ← D435 RGB
   /camera_l/color/image_raw  ← D405-L RGB
   /camera_r/color/image_raw  ← D405-R RGB
@@ -19,14 +19,14 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    # ── Piper 左臂 (can1, mode=0 只读) ──
+    # ── Piper 左臂 (can_left_slave, mode=0 只读) ──
     piper_left = Node(
         package='piper',
-        executable='piper_start_ms_node.py',
+        executable='arm_reader_node.py',
         name='piper_left',
         output='screen',
         parameters=[{
-            'can_port': 'can1',
+            'can_port': 'can_left_slave',
             'mode': 0,          # 只读: 发布关节状态，不接受控制
             'auto_enable': False,
         }],
@@ -39,14 +39,14 @@ def generate_launch_description():
         ],
     )
 
-    # ── Piper 右臂 (can2, mode=0 只读) ──
+    # ── Piper 右臂 (can_right_slave, mode=0 只读) ──
     piper_right = Node(
         package='piper',
-        executable='piper_start_ms_node.py',
+        executable='arm_reader_node.py',
         name='piper_right',
         output='screen',
         parameters=[{
-            'can_port': 'can2',
+            'can_port': 'can_right_slave',
             'mode': 0,
             'auto_enable': False,
         }],

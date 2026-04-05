@@ -1,8 +1,8 @@
-"""ROS2 launch file for start_ms_piper_new.
+"""ROS2 launch file for 4-arm teleoperation.
 
-Converted from ROS1 start_ms_piper_new.launch.
-Launches left/right master arms (mode=0) and left/right slave arms (mode=1)
-using piper_start_ms_node_new.py.
+Launches left/right master (teach-handle) arms in mode=0 and left/right slave
+(executor) arms in mode=1, using arm_teleop_node.py. Used for dual-arm teleop
+data collection on the master/slave CAN topology (can_*_mas + can_*_slave).
 """
 
 from launch import LaunchDescription
@@ -27,7 +27,7 @@ def generate_launch_description():
     # Left master
     piper_master_left = Node(
         package='piper',
-        executable='piper_start_ms_node_new.py',
+        executable='arm_teleop_node.py',
         name='piper_master_left',
         output='screen',
         parameters=[{
@@ -55,7 +55,7 @@ def generate_launch_description():
     # Right master
     piper_master_right = Node(
         package='piper',
-        executable='piper_start_ms_node_new.py',
+        executable='arm_teleop_node.py',
         name='piper_master_right',
         output='screen',
         parameters=[{
@@ -85,7 +85,7 @@ def generate_launch_description():
     # Left slave
     piper_slave_left = Node(
         package='piper',
-        executable='piper_start_ms_node_new.py',
+        executable='arm_teleop_node.py',
         name='piper_slave_left',
         output='screen',
         parameters=[{
@@ -107,7 +107,7 @@ def generate_launch_description():
     # Right slave
     piper_slave_right = Node(
         package='piper',
-        executable='piper_start_ms_node_new.py',
+        executable='arm_teleop_node.py',
         name='piper_slave_right',
         output='screen',
         parameters=[{

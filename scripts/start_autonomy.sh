@@ -1,12 +1,12 @@
 #!/bin/bash
 ###############################################################################
-# kai0 推理 + Rerun 可视化 一键启动
+# kai0 自主运行 + Rerun 可视化 一键启动 (autonomy_launch + rerun)
 #
 # 用法:
-#   ./scripts/start_infer_vis.sh                    # 默认: ros2 模式 + Rerun
-#   ./scripts/start_infer_vis.sh --no-rerun         # 不启动 Rerun
-#   ./scripts/start_infer_vis.sh --mode websocket   # WebSocket 模式
-#   ./scripts/start_infer_vis.sh --execute          # 直接进入执行模式
+#   ./scripts/start_autonomy.sh                    # 默认: ros2 模式 + Rerun
+#   ./scripts/start_autonomy.sh --no-rerun         # 不启动 Rerun
+#   ./scripts/start_autonomy.sh --mode websocket   # WebSocket 模式
+#   ./scripts/start_autonomy.sh --execute          # 直接进入执行模式
 #
 # 流程:
 #   1. 清理残留进程
@@ -47,7 +47,7 @@ fail() { echo -e "${RED}[FAIL]${NC} $1"; exit 1; }
 info() { echo -e "${CYAN}[INFO]${NC} $1"; }
 
 echo "============================================================"
-echo " kai0 Inference + Visualization"
+echo " kai0 Autonomy + Visualization"
 echo " Mode: $MODE | Rerun: $ENABLE_RERUN | Execute: $EXECUTE_MODE"
 echo "============================================================"
 
@@ -55,7 +55,7 @@ echo "============================================================"
 echo ""
 echo "--- Step 1: 清理残留进程 ---"
 
-KILL_PATTERNS="realsense2_camera_node|piper_start_ms_node|policy_inference_node|rerun_viz_node|multi_camera_node|inference_full_launch"
+KILL_PATTERNS="realsense2_camera_node|arm_reader_node|arm_teleop_node|policy_inference_node|rerun_viz_node|multi_camera_node|autonomy_launch"
 PIDS=$(ps aux | grep -E "$KILL_PATTERNS" | grep -v grep | grep -v $$ | awk '{print $2}' || true)
 if [ -n "$PIDS" ]; then
     COUNT=$(echo "$PIDS" | wc -w)
@@ -238,7 +238,7 @@ info "starting ros2 launch..."
 echo "  Ctrl+C to stop all nodes"
 echo ""
 
-exec ros2 launch piper inference_full_launch.py \
+exec ros2 launch piper autonomy_launch.py \
     mode:="$MODE" \
     enable_rerun:="$ENABLE_RERUN" \
     execute_mode:="$EXECUTE_MODE" \

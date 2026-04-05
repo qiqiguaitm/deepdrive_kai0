@@ -93,10 +93,11 @@ uv run python scripts/serve_policy.py --config <config_name> --checkpoint <ckpt_
 ### Deployment Scripts (top-level `scripts/`)
 
 Local scripts for this specific deployment setup:
-- `launch_ros2_inference.sh` / `run_policy_node.sh` — Launch inference pipeline with ROS2
+- `start_autonomy.sh` — Launch full autonomy (policy rollout) stack: cameras + arms + policy node
+- `start_policy_node.sh` — Launch only policy_inference_node (--mode ros2/websocket/both), when other nodes already running
 - `start_server_xla_cache.sh` — Start policy server with XLA cache
-- `test_e2e_*.py`, `test_inference_parity.py` — End-to-end and parity tests
-- `bench_inference_latency.py` — Inference latency benchmarking
+- `test_integration_ros2.py`, `test_inference_parity.py` — End-to-end and parity tests
+- `test_inference_server.py --check latency|quality|all` — Inference latency + quality benchmarking (merged from bench_inference_latency.py + verify_inference_quality.py)
 
 ### ROS2 Workspace (`ros2_ws/`)
 

@@ -1,4 +1,7 @@
-# kai0 Task A 复现实施方案
+# kai0 Task A 主规划 (训练 + 部署 Roadmap)
+
+> **作用**: 项目级主规划 —— 训练集群 (gf0/gf1) + 部署机 (sim01) 的整体算力/流程/交付路线图。
+> **关联文档**: sim01 本地具体部署步骤详见 [sim01_deployment.md](sim01_deployment.md)。
 
 > 硬件配置:
 > - 机器人: 双臂 Piper + 2×D405 (hand) + 1×D435 (top)

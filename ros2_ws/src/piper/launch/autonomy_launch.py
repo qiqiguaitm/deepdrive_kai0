@@ -1,17 +1,18 @@
 """
-一键启动全套推理栈 (ROS2 native 模式)
+一键启动自主运行栈 (ROS2 native 模式) —— teleop 的对立面
 
-包含: 2x piper (mode=0 只读) + 3x 相机 (RGB+depth 对齐) + policy_inference_node
+包含: 2x arm_reader_node (mode=1 控制从臂) + 3x 相机 (RGB+depth 对齐) +
+      policy_inference_node. execute_mode 控制模型输出是否真正驱动机器人。
 
 Usage:
   # 纯 ROS2 模式 (推荐, 最低延迟)
-  ros2 launch piper inference_full_launch.py mode:=ros2
+  ros2 launch piper autonomy_launch.py mode:=ros2
 
   # WebSocket 模式 (兼容旧 serve_policy.py, 需先启动 serve_policy)
-  ros2 launch piper inference_full_launch.py mode:=websocket
+  ros2 launch piper autonomy_launch.py mode:=websocket
 
   # 两者兼有模式
-  ros2 launch piper inference_full_launch.py mode:=both
+  ros2 launch piper autonomy_launch.py mode:=both
 """
 import os
 import glob
@@ -123,17 +124,27 @@ def generate_launch_description():
         default_value='false',
         description='Start in execute mode (true) or observe-only mode (false)')
     enable_rerun_arg = DeclareLaunchArgument('enable_rerun',
-        default_value='false',
+        default_value='true',
         description='Enable Rerun 3D visualization of trajectories')
     calib_arg = DeclareLaunchArgument('calibration_config',
         default_value=_DEFAULT_CALIB,
         description='Calibration YAML path (for FK visualization in Rerun)')
+    # ── Rerun mesh visualization (docs/inference_visualization_mesh.md) ──
+    # Foreground: per-tick screen-space triangle mesh per camera (replaces
+    # legacy point cloud rendering). Background: one-shot TSDF fusion of the
+    # static workspace (requires open3d).
+    fg_enable_arg = DeclareLaunchArgument('fg_enable',
+        default_value='false',
+        description='Render depth as triangle mesh instead of point cloud')
+    bg_enable_arg = DeclareLaunchArgument('bg_enable',
+        default_value='false',
+        description='Enable static background mesh (TSDF, requires open3d)')
 
     # ── Piper 左臂 (mode=1 控制从臂, auto_enable 上电) ──
     # mode=1: subscribe to /master/joint_left and drive the slave arm hardware
     # mode=0: read-only (for data collection / visualization only, no motion)
     piper_left = Node(
-        package='piper', executable='piper_start_ms_node.py',
+        package='piper', executable='arm_reader_node.py',
         name='piper_left', output='screen',
         parameters=[{'can_port': _LEFT_CAN, 'mode': 1, 'auto_enable': True}],
         remappings=[
@@ -147,7 +158,7 @@ def generate_launch_description():
 
     # ── Piper 右臂 (mode=1 控制从臂) ──
     piper_right = Node(
-        package='piper', executable='piper_start_ms_node.py',
+        package='piper', executable='arm_reader_node.py',
         name='piper_right', output='screen',
         parameters=[{'can_port': _RIGHT_CAN, 'mode': 1, 'auto_enable': True}],
         remappings=[
@@ -199,6 +210,18 @@ def generate_launch_description():
     )
 
     # ── Rerun Visualization Node (separate process, conditional) ──
+    # GPU isolation: the viz node runs JAX (for depth reprojection) and
+    # optionally Open3D tensor TSDF (for the background mesh). Both must
+    # live on a different physical GPU than the policy JAX context, or
+    # initializing a second JAX context on the same device will segfault
+    # on first use. policy_inference_node defaults to gpu_id:=0 (see the
+    # DeclareLaunchArgument above), so pin the viz process to GPU 1 here
+    # explicitly — the setdefault fallback inside rerun_viz_node.py is
+    # only for standalone `ros2 run` invocations.
+    #
+    # XLA_PYTHON_CLIENT_PREALLOCATE=false is critical when bg_enable=true:
+    # Open3D's CUDA caching allocator needs room on the same card after
+    # JAX has initialized. MEM_FRACTION=0.20 keeps JAX's hard cap low.
     rerun_node = Node(
         package='piper', executable='rerun_viz_node.py',
         name='rerun_viz', output='screen',
@@ -213,7 +236,14 @@ def generate_launch_description():
             'depth_right_topic': '/camera_r/camera/aligned_depth_to_color/image_raw',
             'puppet_left_topic': '/puppet/joint_left',
             'puppet_right_topic': '/puppet/joint_right',
+            'fg_enable': LaunchConfiguration('fg_enable'),
+            'bg_enable': LaunchConfiguration('bg_enable'),
         }],
+        additional_env={
+            'CUDA_VISIBLE_DEVICES': '1',
+            'XLA_PYTHON_CLIENT_PREALLOCATE': 'false',
+            'XLA_PYTHON_CLIENT_MEM_FRACTION': '0.20',
+        },
     )
 
     # 环境变量 (CUDA 库 + Python 路径 + venv bin for rerun CLI, 追加到现有值)
@@ -238,7 +268,7 @@ def generate_launch_description():
     cleanup = ExecuteProcess(
         cmd=['bash', '-c',
              'pkill -9 -f "rerun_viz_node|multi_camera_node|policy_inference_node'
-             '|piper_start_ms_node|piper_start_slave_node|realsense2_camera_node'
+             '|arm_reader_node|arm_teleop_node|realsense2_camera_node'
              '|rerun_sdk/rerun_cli/rerun" || true; '
              'sleep 2'],
         output='screen',
@@ -257,6 +287,7 @@ def generate_launch_description():
         set_ld, set_py, set_path, set_cache, set_mem_frac,
         mode_arg, gpu_arg, config_arg, ckpt_arg, host_arg, port_arg, prompt_arg,
         execute_mode_arg, enable_rerun_arg, calib_arg,
+        fg_enable_arg, bg_enable_arg,
         cleanup,
         piper_left_delayed, piper_right_delayed,
         multi_cam_delayed,

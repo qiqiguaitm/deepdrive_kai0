@@ -401,7 +401,7 @@ cat << 'USAGE'
        --policy.dir=checkpoints/Task_A/mixed_1
 
   3. ROS2 推理栈 (终端 2):
-     ./scripts/launch_ros2_inference.sh ros2
+     ./scripts/start_autonomy.sh
 
 USAGE
 fi

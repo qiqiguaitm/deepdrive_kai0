@@ -90,17 +90,17 @@ def main():
         return
     ok("ROS2 环境可用")
 
-    # ── 1. 启动 Piper 右臂节点 (can2) ──
+    # ── 1. 启动 Piper 右臂节点 (can_right_slave) ──
     print(f"\n{'─'*60}")
-    info("Step 1: 启动 Piper 右臂节点 (can2, mode=0 只读)...")
+    info("Step 1: 启动 Piper 右臂节点 (can_right_slave, mode=0 只读)...")
 
-    # 检查 can2
-    can2_check = subprocess.run(["ip", "link", "show", "can2"], capture_output=True, text=True)
-    if "UP" in can2_check.stdout:
+    # 检查 can_right_slave
+    can_check = subprocess.run(["ip", "link", "show", "can_right_slave"], capture_output=True, text=True)
+    if "UP" in can_check.stdout:
         p_arm = subprocess.Popen(
-            ["ros2", "run", "piper", "piper_start_ms_node.py",
+            ["ros2", "run", "piper", "arm_reader_node.py",
              "--ros-args",
-             "-p", "can_port:=can2", "-p", "mode:=0",
+             "-p", "can_port:=can_right_slave", "-p", "mode:=0",
              "-r", "/puppet/joint_states:=/puppet/joint_right",
              "-r", "/puppet/arm_status:=/puppet/arm_status_right",
              "-r", "/puppet/end_pose:=/puppet/end_pose_right",
@@ -115,7 +115,7 @@ def main():
         else:
             warn("右臂节点启动但 topic 未就绪")
     else:
-        warn("can2 未 UP, 跳过右臂节点")
+        warn("can_right_slave 未 UP, 跳过右臂节点")
 
     # ── 2. 启动相机节点 ──
     print(f"\n{'─'*60}")
