@@ -26,18 +26,87 @@ SKIP_CAN=1 SKIP_ARMS=1 SKIP_CAMERAS=1 ./run.sh start
 - 前端 http://HOST:5173/
 - 后端 http://HOST:8787/  (REST docs: `/docs`；WS: `/ws/status`)
 
-## 后端（手动）
+## 后端 venv 构建
+
+### 为什么不能直接 `python3 -m venv`
+后端需要 `import rclpy`。ROS2 Jazzy 只分发了 **Python 3.12** 的 rclpy C 扩展
+(`/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/_rclpy_pybind11.cpython-312-*.so`),
+其它 Python 版本导入时会报
+`No module named 'rclpy._rclpy_pybind11'` → 后端静默回落到 `MockBridge`, UI 上
+CAN / cameras / teleop 全红。因此 venv 里的 `python` 必须是 `3.12`。
+
+sim01 的复杂性:
+1. `python3` 指向 miniconda 的 3.13 (不匹配 rclpy);
+2. `/usr/bin/python3.12` 存在, 但系统没装 `python3.12-venv`, 所以 `python3.12 -m venv`
+   会报 `ensurepip is not available`;
+3. 我们不总是有 `sudo apt install python3.12-venv` 的权限.
+
+下面给出两条路径: 有 sudo 走 A (干净), 没 sudo 走 B (workaround, 与 gzllll 的现有 venv 一致).
+
+### A. 有 sudo —— 直接用系统 3.12
+```bash
+sudo apt install -y python3.12-venv
+
+cd web/data_manager/backend
+rm -rf .venv
+/usr/bin/python3.12 -m venv .venv
+.venv/bin/pip install --upgrade pip
+.venv/bin/pip install -r requirements.txt
+```
+
+### B. 无 sudo —— "3.13 骨架 + 3.12 解释器" 组合
+用 miniconda 3.13 (有 `venv` 模块) 生成 venv 骨架, 然后把 `bin/python` 换成
+`/usr/bin/python3.12`, 再用 `get-pip.py` 给 3.12 装 pip (因为没 `ensurepip`):
+```bash
+cd web/data_manager/backend
+rm -rf .venv
+
+# 1) 用 miniconda 的 3.13 建骨架 (activate / site-packages / include)
+/data1/miniconda3/bin/python3 -m venv .venv
+
+# 2) 把 python* 符号链接全部指向系统 3.12, 让实际运行的解释器是 3.12
+rm .venv/bin/python .venv/bin/python3 .venv/bin/python3.13
+ln -sf /usr/bin/python3.12 .venv/bin/python
+ln -sf python .venv/bin/python3
+ln -sf python .venv/bin/python3.12
+ln -sf python .venv/bin/python3.13
+
+# 3) 没 ensurepip, 用官方 bootstrap 给 3.12 装 pip
+curl -sSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+.venv/bin/python /tmp/get-pip.py
+
+# 4) 装依赖 (会写入 lib/python3.12/site-packages)
+.venv/bin/pip install -r requirements.txt
+```
+产出的 venv: `pyvenv.cfg` 里 version 仍然是 3.13 (骨架来源), 但 `bin/python -V`
+返回 `Python 3.12.x`, 且 `lib/python3.12/site-packages` 有全套包。
+
+### 验证
+```bash
+source /opt/ros/jazzy/setup.bash
+source $REPO_ROOT/ros2_ws/install/setup.bash
+.venv/bin/python -c "import rclpy; print(rclpy.__file__)"
+# 期望: /opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py
+
+./run.sh start
+grep RclpyBridge logs/backend.log
+# 期望: [ros_bridge] RclpyBridge online    (不是 "using MockBridge")
+```
+UI 上 `CAN 左/右`, `teleop`, 三路相机 fps 应全部变绿。
+
+### 常见环境变量
+```bash
+export KAI0_TEMPLATES=../config/collection_templates.yml
+# ROS bridge: auto(默认) / mock(强制假数据, 不依赖 rclpy 可用)
+# export KAI0_ROS_BRIDGE=mock
+# 数据根: 默认 /data1/DATA_IMP/KAI0 (与 repo 隔离, git clean / 删 venv 不会误清)
+# export KAI0_DATA_ROOT=/some/other/path
+```
+手动启动后端 (`run.sh` 以外):
 ```bash
 cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt   # 含 av (PyAV)、pyarrow
-# 数据根：默认 /data1/DATA_IMP/KAI0 (与 repo 隔离, 不会被 git clean / 删 venv 误清除)
-# 想换位置:
-# export KAI0_DATA_ROOT=/some/other/path
-export KAI0_TEMPLATES=../config/collection_templates.yml
-# ROS bridge: auto(默认) / mock(强制假数据)
-# export KAI0_ROS_BRIDGE=mock
-uvicorn app.main:app --host 0.0.0.0 --port 8787 --reload
+source /opt/ros/jazzy/setup.bash && source $REPO_ROOT/ros2_ws/install/setup.bash
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8787 --reload
 ```
 
 ## 前端（手动）

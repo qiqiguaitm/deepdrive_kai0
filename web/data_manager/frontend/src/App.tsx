@@ -68,7 +68,21 @@ export function App() {
         disabled={status?.recorder.state === "RECORDING"}
       />
       <div className="main">
-        <EpisodeList selected={selectedEp} onSelect={setSelectedEp} refreshKey={refreshKey} />
+        <EpisodeList
+          selected={selectedEp}
+          onSelect={setSelectedEp}
+          refreshKey={refreshKey}
+          role={role}
+          onDeleted={(e) => {
+            if (selectedEp
+                && selectedEp.task_id === e.task_id
+                && selectedEp.subset === e.subset
+                && selectedEp.episode_id === e.episode_id) {
+              setSelectedEp(null);
+            }
+            setRefreshKey(k => k + 1);
+          }}
+        />
         <CameraGrid cameras={status?.cameras || {}} />
         <ArmsPanel />
         <Controls

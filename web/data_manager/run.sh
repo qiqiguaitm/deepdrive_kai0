@@ -16,19 +16,23 @@
 #   KAI0_ROS_BRIDGE=mock  强制 mock（无 ROS2 环境时调试用）
 
 set -u
-# 清理上一次的进程: pkill -f ros2 只能匹配到 `ros2 launch` 封装进程,
+# ros2 孤儿清理: pkill -f ros2 只能匹配到 `ros2 launch` 封装进程,
 # 匹配不到它拉起的 realsense2_camera_node / arm_teleop_node 子进程
 # (命令行里已经没有 "ros2" 字样)。这些孤儿会独占 CAN 和 RealSense 设备,
 # 导致下次启动看不见相机/机械臂, 所以这里补一遍, 先 TERM 再 KILL。
-pkill -f ros2 2>/dev/null || true
-pkill -f realsense2_camera_node 2>/dev/null || true
-pkill -f arm_teleop_node 2>/dev/null || true
-sleep 1
-pkill -9 -f realsense2_camera_node 2>/dev/null || true
-pkill -9 -f arm_teleop_node 2>/dev/null || true
-# 端口级孤儿清理 (kill_port 等到 helpers 定义后才能调用; 见下面 do_start 开头).
+# 注意: 只在 start/stop 时调用, status/logs 绝不能碰 —— 否则 `./run.sh status`
+# 会把活着的 arms/cameras 连根拔起 (历史 bug: pkill 曾在顶层, status 都杀).
+kill_ros2_orphans() {
+    pkill -f ros2 2>/dev/null || true
+    pkill -f realsense2_camera_node 2>/dev/null || true
+    pkill -f arm_teleop_node 2>/dev/null || true
+    sleep 1
+    pkill -9 -f realsense2_camera_node 2>/dev/null || true
+    pkill -9 -f arm_teleop_node 2>/dev/null || true
+}
 # ------------------------------------------------------------ paths
-REPO_ROOT="/data1/gzllll/deepdive_kai0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WEB_DIR="$REPO_ROOT/web/data_manager"
 BACKEND_DIR="$WEB_DIR/backend"
 FRONTEND_DIR="$WEB_DIR/frontend"
@@ -144,9 +148,11 @@ stop_svc() {
 
 # ------------------------------------------------------------ actions
 do_start() {
-    # 0) 端口级孤儿清理: 如果 backend/frontend 端口已被占用 (上次没清干净的孤儿,
-    #    或别的进程占了), 提前杀掉, 避免新 uvicorn/vite 因 "address in use" 静默退出
-    #    然后 pidfile 又指向死 PID 的循环。
+    # 0a) ROS2 孤儿清理 (只在 start 时, 避免误伤 status/logs 看到的活服务).
+    kill_ros2_orphans
+    # 0b) 端口级孤儿清理: 如果 backend/frontend 端口已被占用 (上次没清干净的孤儿,
+    #     或别的进程占了), 提前杀掉, 避免新 uvicorn/vite 因 "address in use" 静默退出
+    #     然后 pidfile 又指向死 PID 的循环。
     for svc in "${!SVC_PORT[@]}"; do
         kill_port "${SVC_PORT[$svc]}"
     done
@@ -203,6 +209,8 @@ do_stop() {
     for svc in frontend backend cameras arms; do
         stop_svc "$svc"
     done
+    # stop_svc 走 pidfile, 可能漏掉 pidfile 失同步的 ros2 子进程, 兜底清一次.
+    kill_ros2_orphans
 }
 
 do_status() {
