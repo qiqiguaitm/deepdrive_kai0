@@ -87,6 +87,8 @@ export function App() {
         <ArmsPanel />
         <Controls
           rec={status?.recorder ?? null}
+          status={status}
+          connected={connected}
           templateId={tplId}
           operator={operator}
           onChanged={() => setRefreshKey(k => k + 1)}

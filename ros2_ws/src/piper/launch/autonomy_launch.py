@@ -111,7 +111,7 @@ def generate_launch_description():
         default_value='pi05_flatten_fold_normal',
         description='Training config name (determines transform pipeline)')
     ckpt_arg = DeclareLaunchArgument('checkpoint_dir',
-        default_value=os.path.join(_KAI0_ROOT, 'checkpoints', 'kai0_mixed_1_grad', '0'),
+        default_value=os.path.join(_KAI0_ROOT, 'checkpoints', 'pi05_flatten_fold_normal_v1'),
         description='Trained model checkpoint path (kai0 best model or your own trained checkpoint)')
     host_arg = DeclareLaunchArgument('host', default_value='localhost',
         description='WebSocket server host (only for mode=websocket)')

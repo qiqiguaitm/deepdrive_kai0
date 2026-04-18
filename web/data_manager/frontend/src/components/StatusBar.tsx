@@ -10,7 +10,7 @@ function Light({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-function collectFailures(status: StatusPayload): string[] {
+export function collectFailures(status: StatusPayload): string[] {
   const f: string[] = [];
   if (!status.health.ros2) f.push("ROS2");
   if (!status.health.can_left) f.push("CAN-L");

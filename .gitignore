@@ -31,6 +31,20 @@ validation_data/
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
+# Colcon sometimes drops top-level install/ + log/ when invoked outside ros2_ws
+/install/
+/log/
+/logs/
+
+# ===== W&B offline runs =====
+kai0/wandb/
+wandb/
+
+# ===== Auto-generated norm_stats (reproducible via compute_*_norm_stats_fast.py) =====
+kai0/assets/pi05_stand_box_*/
+
+# ===== Frontend build artifacts =====
+*.tsbuildinfo
 
 # ===== JAX / XLA =====
 /tmp/xla_cache/

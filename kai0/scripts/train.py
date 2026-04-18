@@ -1,7 +1,11 @@
 import dataclasses
 import functools
+import json
 import logging
+import os
 import platform
+import subprocess
+import sys
 from typing import Any
 
 import etils.epath as epath
@@ -17,6 +21,115 @@ import tqdm_loggable.auto as tqdm
 import wandb
 import shutil
 from pathlib import Path
+
+
+# ----- Inline eval (in-process, shares train_state.params — no GPU double-allocation) -----
+# Enable via env:  INLINE_EVAL_VAL_ROOT=<path_to_val>
+# Optional:        INLINE_EVAL_N_FRAMES=20  (query frames per episode)
+# Optional:        INLINE_EVAL_EVERY=1      (run eval every Nth save, default 1)
+# Memory: re-uses train_state params (~0 GB extra) + inference activations (~3 GB).
+_VAL_CACHE = {"root": None, "samples": None}
+
+def _load_val_data(val_root: str, n_frames_per_ep: int):
+    """Load val parquets + decoded mp4 frames. Cached across eval calls."""
+    global _VAL_CACHE
+    if _VAL_CACHE["root"] == val_root and _VAL_CACHE["samples"] is not None:
+        return _VAL_CACHE["samples"]
+    import pyarrow.parquet as pq
+    import av as _av
+    val_root_p = Path(val_root)
+    samples = []
+    for ep_path in sorted((val_root_p / "data" / "chunk-000").glob("episode_*.parquet")):
+        df = pq.read_table(ep_path).to_pandas()
+        ep_idx = int(ep_path.stem.split("_")[1])
+        state = np.stack([np.asarray(x, dtype=np.float32) for x in df["observation.state"]])
+        action = np.stack([np.asarray(x, dtype=np.float32) for x in df["action"]])
+        L = len(state)
+        vids = {}
+        for cam in ("top_head", "hand_left", "hand_right"):
+            vp = val_root_p / "videos" / "chunk-000" / f"observation.images.{cam}" / f"episode_{ep_idx:06d}.mp4"
+            container = _av.open(str(vp))
+            container.streams.video[0].thread_type = "AUTO"
+            frames = []
+            for f in container.decode(video=0):
+                frames.append(f.to_ndarray(format="rgb24"))
+                if len(frames) >= L: break
+            container.close()
+            arr = np.stack(frames[:L], axis=0)
+            if arr.shape[0] < L:
+                arr = np.concatenate([arr, np.repeat(arr[-1:], L - arr.shape[0], axis=0)], axis=0)
+            vids[cam] = arr
+        q_idx = np.linspace(0, max(L - 51, 0), n_frames_per_ep).astype(int)
+        samples.append({"ep_idx": ep_idx, "length": L, "state": state, "action": action,
+                        "images": vids, "q_idx": q_idx})
+    _VAL_CACHE = {"root": val_root, "samples": samples}
+    return samples
+
+
+def _build_eval_policy(train_state, config, data_config):
+    """Policy sharing train_state params (no copy). ema_params preferred if present."""
+    from openpi.policies import policy as _policy
+    import openpi.transforms as _transforms_mod
+    params = train_state.ema_params if train_state.ema_params is not None else train_state.params
+    model = nnx.merge(train_state.model_def, params)
+    model.eval()
+    default_prompt = getattr(config.data, "default_prompt", None)
+    norm_stats = data_config.norm_stats
+    use_q = data_config.use_quantile_norm
+    # Mirror policy_config.create_trained_policy: skip data_config.repack_transforms (they're
+    # for dataset→internal key remapping during training; our inline-eval obs is already in
+    # the internal format {images, state, prompt}).
+    transforms_in = [
+        _transforms_mod.InjectDefaultPrompt(default_prompt),
+        *data_config.data_transforms.inputs,
+        _transforms_mod.Normalize(norm_stats, use_quantiles=use_q),
+        *data_config.model_transforms.inputs,
+    ]
+    transforms_out = [
+        *data_config.model_transforms.outputs,
+        _transforms_mod.Unnormalize(norm_stats, use_quantiles=use_q),
+        *data_config.data_transforms.outputs,
+    ]
+    return _policy.Policy(model, transforms=transforms_in, output_transforms=transforms_out)
+
+
+def _run_inline_eval(train_state, config, data_config, step, mesh):
+    val_root = os.environ.get("INLINE_EVAL_VAL_ROOT")
+    if not val_root:
+        return
+    n_frames = int(os.environ.get("INLINE_EVAL_N_FRAMES", "20"))
+    every = int(os.environ.get("INLINE_EVAL_EVERY", "1"))
+    if (step // config.save_interval) % every != 0:
+        return
+    import time
+    t0 = time.time()
+    try:
+        samples = _load_val_data(val_root, n_frames)
+        with sharding.set_mesh(mesh):
+            policy = _build_eval_policy(train_state, config, data_config)
+            HORIZONS = (1, 10, 25, 50)
+            acc = {h: [] for h in HORIZONS}
+            for s in samples:
+                for k in s["q_idx"]:
+                    obs = {
+                        "images": {c: s["images"][c][k] for c in s["images"]},
+                        "state": s["state"][k],
+                        "prompt": getattr(config.data, "default_prompt", "stand up the fallen box"),
+                    }
+                    res = policy.infer(obs)
+                    pred = np.asarray(res["actions"])
+                    for h in HORIZONS:
+                        if k + 1 + h <= s["length"] and h <= pred.shape[0]:
+                            gt = s["action"][k + 1:k + 1 + h]
+                            acc[h].append(float(np.mean(np.abs(gt - pred[:h]))))
+        mae = {h: float(np.mean(acc[h])) for h in HORIZONS if acc[h]}
+        wandb.log({f"val/mae_{h}": v for h, v in mae.items()}, step=step)
+        logging.info(
+            f"[inline-eval] step={step}  MAE@1={mae.get(1,0):.4f}  @10={mae.get(10,0):.4f}  "
+            f"@25={mae.get(25,0):.4f}  @50={mae.get(50,0):.4f}  ({time.time()-t0:.1f}s)"
+        )
+    except Exception as e:
+        logging.warning(f"[inline-eval] failed at step={step}: {e}", exc_info=True)
 
 
 import openpi.models.model as _model
@@ -278,7 +391,9 @@ def main(config: _config.TrainConfig):
         batch = next(data_iter)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
-            _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step, config.save_train_state)
+            _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)
+            if os.environ.get("INLINE_EVAL_VAL_ROOT"):
+                _run_inline_eval(train_state, config, data_loader.data_config(), step, mesh)
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()

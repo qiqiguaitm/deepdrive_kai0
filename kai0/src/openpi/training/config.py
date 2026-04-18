@@ -21,6 +21,7 @@ import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
+import openpi.shared.nnx_utils as nnx_utils
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
 import openpi.training.misc.polaris_config as polaris_config
@@ -1189,6 +1190,214 @@ _CONFIGS = [
         keep_period=5000,
         num_workers=8,
         batch_size=256,
+    ),
+    # Task E: stand up the fallen box — 73 ep, small dataset, sim01 local 5090s.
+    # Clean init from pi05_base (not Task A ckpt) — gf0 packaged and transferred via TOS to sim01.
+    # Freeze PaliGemma backbone (img + LLM main tower), train only Action Expert (llm.*_1) and top-level
+    # projections (action_in_proj, action_out_proj, time_mlp_*). Shrinks train_state from ~65 GB to ~22 GB.
+    # Single GPU batch=4 on sim01 (multi-GPU NCCL has orphan-worker pinned-memory issue; investigate in v2).
+    # See docs/taskE_master_plan.md.
+    TrainConfig(
+        name="pi05_stand_box_normal",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "gs://openpi-assets/checkpoints/pi05_base/params"  # resolves via OPENPI_DATA_HOME cache
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),        # freeze PaliGemma (img + llm main tower)
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")), # but keep Action Expert LLM layers trainable
+        ),
+        ema_decay=None,           # EMA meaningless with frozen backbone; saves ~6.5 GB/card
+        num_train_steps=25_000,   # fewer params to learn → converges faster than full FT
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=4,
+        batch_size=8,             # 2 GPU FSDP (GPU0+GPU3, memory-having NUMAs); per-device bs=8
+        fsdp_devices=2,
+    ),
+    # Task E v3: same as v2 (abs + freeze-all-backbone) but init from kai0_mixed_1
+    # (Task A Model Arithmetic 等权 average 合并) instead of pi05_base. Tests whether
+    # kai0's MA-combined Task A weights transfer better than raw pi05_base.
+    TrainConfig(
+        name="pi05_stand_box_kai0init",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E v4: pi05_base init + abs + freeze + augmented data (mirror + time_scale).
+    TrainConfig(
+        name="pi05_stand_box_aug",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base_full_aug",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "gs://openpi-assets/checkpoints/pi05_base/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E v5': kai0 init + abs + freeze + augmented data.
+    TrainConfig(
+        name="pi05_stand_box_kai0_aug",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base_full_aug",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E v8: pi05_base init + abs + freeze + mirror-only data (base + mirror, 128 eps).
+    # Ablation of v4: isolates space-mirroring gain from time-scaling gain.
+    TrainConfig(
+        name="pi05_stand_box_mirror",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base_merged",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "gs://openpi-assets/checkpoints/pi05_base/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E v5: v2 baseline + DELTA joint actions. Hypothesis: predicting joint delta
+    # is easier than absolute, reduces error accumulation. Uses separate asset_id so
+    # norm_stats (computed on delta, not absolute) doesn't collide with v2's.
+    TrainConfig(
+        name="pi05_stand_box_delta",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=True,
+            assets=AssetsConfig(asset_id="stand_box_delta"),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "gs://openpi-assets/checkpoints/pi05_base/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=4,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E v12: v5 (delta) + v1.5 (vision unfrozen) combo. Reduced batch for VRAM.
+    TrainConfig(
+        name="pi05_stand_box_v15_delta",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=True,
+            assets=AssetsConfig(asset_id="stand_box_delta"),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "gs://openpi-assets/checkpoints/pi05_base/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma\\.llm.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=4,
+        batch_size=2,  # vision trainable needs more VRAM
+        fsdp_devices=1,
+    ),
+    # Task E v1.5: same as pi05_stand_box_normal BUT unfreeze vision tower (SigLIP).
+    # Rationale: if v1 (freeze all backbone) plateaus at MAE@1 ≈ 0.054, let vision adapt
+    # to the new camera's specific distribution while keeping LLM main tower frozen.
+    # Trainable: PaliGemma.img.* (~400 M) + Action Expert (~800 M) = ~1.2 B.
+    TrainConfig(
+        name="pi05_stand_box_normal_v15",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "gs://openpi-assets/checkpoints/pi05_base/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma\\.llm.*"),     # freeze only LLM main tower
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),    # keep Action Expert trainable
+            # PaliGemma.img.* path not matched → vision tower trainable
+        ),
+        ema_decay=None,
+        num_train_steps=25_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=4,
+        batch_size=4,
+        fsdp_devices=1,
     ),
     TrainConfig(
         name="pi05_tee_shirt_sort_normal",

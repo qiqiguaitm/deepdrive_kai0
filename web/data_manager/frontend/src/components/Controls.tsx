@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { api } from "../api/client";
-import type { RecorderSnap } from "../types";
+import type { RecorderSnap, StatusPayload } from "../types";
+import { collectFailures } from "./StatusBar";
 
 interface Props {
   rec: RecorderSnap | null;
+  status: StatusPayload | null;
+  connected: boolean;
   templateId: string;
   operator: string;
   onChanged: () => void;
 }
 
-export function Controls({ rec, templateId, operator, onChanged }: Props) {
+export function Controls({ rec, status, connected, templateId, operator, onChanged }: Props) {
   const [success, setSuccess] = useState(true);
   const [note, setNote] = useState("");
   const [tags, setTags] = useState("");
@@ -24,6 +27,19 @@ export function Controls({ rec, templateId, operator, onChanged }: Props) {
     try { await fn(); onChanged(); }
     catch (e: any) { alert(e.message || String(e)); }
     finally { setBusy(false); }
+  };
+
+  const onStart = () => {
+    if (!connected || !status) {
+      alert("系统异常：未连接到后端状态流，请修复后再采集。");
+      return;
+    }
+    const failures = collectFailures(status);
+    if (failures.length > 0) {
+      alert(`系统异常，请修复后再采集：\n- ${failures.join("\n- ")}`);
+      return;
+    }
+    wrap(() => api.startRec(templateId, operator));
   };
 
   return (
@@ -42,7 +58,7 @@ export function Controls({ rec, templateId, operator, onChanged }: Props) {
       </div>
       <div className="controls">
         <button className="btn-start" disabled={!canStart || busy}
-          onClick={() => wrap(() => api.startRec(templateId, operator))}>● 开始</button>
+          onClick={onStart}>● 开始</button>
         <button className="btn-save" disabled={!canEnd || busy}
           onClick={() => wrap(() => api.saveRec(success, note, tags.split(",").map(s => s.trim()).filter(Boolean)))}>■ 保存</button>
         <button className="btn-discard" disabled={state === "IDLE" || busy}

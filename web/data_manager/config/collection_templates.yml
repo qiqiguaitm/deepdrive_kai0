@@ -2,36 +2,24 @@ templates:
 - id: task_a_base
   task_id: Task_A
   subset: base
-  prompt: "Flatten and fold the cloth."
+  prompt: Flatten and fold the cloth.
   enabled: true
-  note: "Task A base demo — prompt must match training config pi05_flatten_fold_normal"
+  note: Task A base demo — prompt must match training config pi05_flatten_fold_normal
 - id: task_a_dagger
   task_id: Task_A
   subset: dagger
-  prompt: "Flatten and fold the cloth."
+  prompt: Flatten and fold the cloth.
   enabled: true
-  note: "Task A DAgger correction — same prompt as base"
-- id: task_b_base
-  task_id: Task_B
+  note: Task A DAgger correction — same prompt as base
+- id: task_e_base
+  task_id: Task_E
   subset: base
-  prompt: "Fetch the clothes, fold the tee shirts and hand-over the collared shirts."
+  prompt: stand up the fallen box
   enabled: true
-  note: "Task B TeeShirtSort base"
-- id: task_b_dagger
-  task_id: Task_B
+  note: TASK E BASE
+- id: task_e_dagger
+  task_id: Task_E
   subset: dagger
-  prompt: "Fetch the clothes, fold the tee shirts and hand-over the collared shirts."
+  prompt: stand up the fallen box
   enabled: true
-  note: "Task B TeeShirtSort DAgger"
-- id: task_c_base
-  task_id: Task_C
-  subset: base
-  prompt: "Fetch and hang the cloth."
-  enabled: true
-  note: "Task C HangCloth base"
-- id: task_c_dagger
-  task_id: Task_C
-  subset: dagger
-  prompt: "Fetch and hang the cloth."
-  enabled: true
-  note: "Task C HangCloth DAgger"
+  note: Task E DAgger correction — same prompt as base/training config pi05_stand_box_normal
