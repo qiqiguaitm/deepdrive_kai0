@@ -31,7 +31,11 @@ from pathlib import Path
 _VAL_CACHE = {"root": None, "samples": None}
 
 def _load_val_data(val_root: str, n_frames_per_ep: int):
-    """Load val parquets + decoded mp4 frames. Cached across eval calls."""
+    """Load val parquets + decoded mp4 frames at q_idx only (sparse cache).
+
+    Per-process RAM: ~500 MB (9 ep × 3 cam × 20 frames × 480×640×3 B) vs. ~18.5 GB
+    for full-episode cache. Critical when 4 train procs each hold their own copy.
+    """
     global _VAL_CACHE
     if _VAL_CACHE["root"] == val_root and _VAL_CACHE["samples"] is not None:
         return _VAL_CACHE["samples"]
@@ -45,21 +49,26 @@ def _load_val_data(val_root: str, n_frames_per_ep: int):
         state = np.stack([np.asarray(x, dtype=np.float32) for x in df["observation.state"]])
         action = np.stack([np.asarray(x, dtype=np.float32) for x in df["action"]])
         L = len(state)
-        vids = {}
+        q_idx = np.linspace(0, max(L - 51, 0), n_frames_per_ep).astype(int)
+        q_set = set(int(k) for k in q_idx)
+        vids = {}  # cam -> {k: frame}
         for cam in ("top_head", "hand_left", "hand_right"):
             vp = val_root_p / "videos" / "chunk-000" / f"observation.images.{cam}" / f"episode_{ep_idx:06d}.mp4"
             container = _av.open(str(vp))
             container.streams.video[0].thread_type = "AUTO"
-            frames = []
-            for f in container.decode(video=0):
-                frames.append(f.to_ndarray(format="rgb24"))
-                if len(frames) >= L: break
+            picked = {}
+            for i, f in enumerate(container.decode(video=0)):
+                if i in q_set:
+                    picked[i] = f.to_ndarray(format="rgb24")
+                    if len(picked) == len(q_set):
+                        break
             container.close()
-            arr = np.stack(frames[:L], axis=0)
-            if arr.shape[0] < L:
-                arr = np.concatenate([arr, np.repeat(arr[-1:], L - arr.shape[0], axis=0)], axis=0)
-            vids[cam] = arr
-        q_idx = np.linspace(0, max(L - 51, 0), n_frames_per_ep).astype(int)
+            # last-frame fallback for short episodes
+            last_decoded = next(iter(sorted(picked.keys(), reverse=True)), None)
+            if last_decoded is not None:
+                for k in q_set - set(picked):
+                    picked[k] = picked[last_decoded]
+            vids[cam] = picked
         samples.append({"ep_idx": ep_idx, "length": L, "state": state, "action": action,
                         "images": vids, "q_idx": q_idx})
     _VAL_CACHE = {"root": val_root, "samples": samples}
