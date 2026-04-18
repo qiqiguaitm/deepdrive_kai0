@@ -1,6 +1,6 @@
 """Static background mesh builder using Open3D tensor TSDF (CUDA backend).
 
-See docs/inference_visualization_mesh.md §5. This module is optional — the
+See docs/deployment/inference_visualization_mesh.md §5. This module is optional — the
 viz node handles ImportError gracefully and simply skips the background
 mesh when open3d is not installed.
 

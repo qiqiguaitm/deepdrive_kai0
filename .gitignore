@@ -26,6 +26,16 @@ kai0/data/
 openpi_cache/
 # Validation data
 validation_data/
+# Advantage-estimator eval outputs (videos + pickles)
+kai0/eval_adv_est_out/
+# Advantage-estimator heldout dump pickles
+kai0/model_arithmetic/heldout_dumps/
+kai0/model_arithmetic/outputs/
+
+# ===== Training artifacts (tarballs, bulk logs, run scratch dirs) =====
+*.tar
+/logs/
+train_scripts/**/logs/
 
 # ===== ROS2 build artifacts =====
 ros2_ws/build/

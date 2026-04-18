@@ -8,7 +8,9 @@ This is a workspace for reproducing and deploying **χ₀ (kai0)** — a resourc
 
 The workspace has two main areas:
 - **`kai0/`** — The core kai0 repository (a fork/clone of the kai0 project), containing model code, training scripts, and all three technical modules
-- **Top-level scripts/docs/ros2_ws** — Local deployment scripts, ROS2 workspace, and reproduction guides specific to this setup
+- **Top-level `start_scripts/`, `train_scripts/`, `docs/`, `ros2_ws/`, `web/`, `piper_tools/`, `config/`, `calib/`** — deployment scripts (sim01), training launchers (gf0/gf1/gf2), documentation, ROS2 workspace, data manager UI, CAN tools, hardware configs, calibration data
+
+Per-host paths (`KAI0_DATA_ROOT`, `OPENPI_DATA_HOME`, `PYTORCH_CKPT_BASE`) are populated by sourcing `setup_env.sh` at the repo root; it auto-detects the machine profile (gf / sim01 / default) from hostname + filesystem probes.
 
 ## Hardware Setup
 
@@ -90,19 +92,29 @@ uv run python scripts/serve_policy.py --config <config_name> --checkpoint <ckpt_
 2. **Stage Advantage** (`kai0/stage_advantage/`) — Stage-aware advantage estimation pipeline: GT annotation → train estimator → predict advantage → discretize → AWBC training
 3. **Train-Deploy Alignment** (`kai0/train_deploy_alignment/`) — Data augmentation (time scaling, space mirroring), DAgger data collection, inference with temporal smoothing/ensembling/RTC
 
-### Deployment Scripts (top-level `scripts/`)
+### Deployment Scripts (top-level `start_scripts/`) — sim01
 
 Local scripts for this specific deployment setup:
 - `start_autonomy.sh` — Launch full autonomy (policy rollout) stack: cameras + arms + policy node
 - `start_policy_node.sh` — Launch only policy_inference_node (--mode ros2/websocket/both), when other nodes already running
 - `start_server_xla_cache.sh` — Start policy server with XLA cache
 - `start_teleop.sh` — Launch teleoperation mode
+- `start_data_collect.sh` — Launch teleoperation data-collection pipeline
 - `toggle_execute.sh` — Toggle execution mode on/off
-- `launch_3cam.py` — Launch 3-camera RealSense setup
+- `launch_3cam.py`, `launch_e2e_test.py`
 - `test_integration_ros2.py`, `test_inference_parity.py` — End-to-end and parity tests
 - `test_inference_server.py --check latency|quality|all` — Inference latency + quality benchmarking
 - `test_hardware.py` — Hardware verification (cameras + arms)
 - `test_cameras.py` — Camera diagnostics
+
+### Training Scripts (top-level `train_scripts/`) — gf0/gf1/gf2
+
+Offline training, evaluation, data prep, and monitoring scripts. See `docs/training/training_cli_notes.md` for full details.
+
+- `train_scripts/launch/` — cluster training launchers: `run_gf{0,1,2}.sh`, `run_gf2_adv_est{,_resume}.sh`, `run_awbc_{baseline,q5drop}_*.sh`, `run_kai0_mixed_1_gf{0,1}.sh`, `run_multinode.sh`, `start_train.sh`, `start_task_e_4gpu.sh`
+- `train_scripts/eval/` — offline eval + comparison: `eval_awbc_compare.py`, `eval_val_action_mse.py`, `auto_eval.sh`, `validate_{advantage_estimator,awbc}.py`, `print_mae.py`
+- `train_scripts/data/` — dataset prep/repair: `fix_data.py`, `redownload_bad_videos.py`, `get_episodes.py`, `prepare_advantage_q5.sh`, `prepare_task_e_splits.py`, `generate_episodes_stats.py`, `compute_delta_norm_stats_fast.py`, `to_tos_file.py`
+- `train_scripts/monitor/` — progress/health: `check_progress.py`, `check_task_e_progress.py`, `monitor_kai0_mixed_1.sh`, `jax_dist_test.py`
 
 ### Piper Tools (`piper_tools/`)
 
@@ -116,7 +128,7 @@ ROS2 packages for Piper robot control (`ros2_ws/src/piper/`) and message definit
 
 - Training configs are all defined in `kai0/src/openpi/training/config.py` — this is the central place to set `repo_id` (dataset path), `weight_loader` (base checkpoint path), batch size, etc. Key dataclasses: `TrainConfig`, `DataConfig`, `AssetsConfig`
 - Policy configs (observation/action specs per robot) are in `kai0/src/openpi/policies/policy_config.py`
-- AWBC prompts must match training format exactly: `"<task>, Advantage: positive"` / `"<task>, Advantage: negative"`
+- AWBC prompts must match training format exactly: `"<task>. Advantage: positive"` / `"<task>. Advantage: negative"` (period separator — the tasks.jsonl format produced by `discretize_advantage.py`; NOT the comma format used at training-time continuous advantage injection via `InsertAdvantageIntoPrompt`)
 
 ### Hardware Configuration (`config/`)
 
@@ -148,14 +160,20 @@ checkpoints/<name>/
 
 ### Environment Variables
 
-| Variable | Purpose | Typical Value |
-|----------|---------|---------------|
-| `OPENPI_DATA_HOME` | Cache dir for downloaded checkpoints/data | `~/.cache/openpi` |
-| `XLA_PYTHON_CLIENT_MEM_FRACTION` | JAX GPU memory fraction | `0.9` for training |
-| `XLA_PYTHON_CLIENT_PREALLOCATE` | JAX memory preallocation | `false` (set in data_loader, model_arithmetic) |
-| `JAX_COMPILATION_CACHE_DIR` | XLA compilation cache | `.xla_cache` (project-local in start_policy_node.sh) |
-| `CUDA_VISIBLE_DEVICES` | GPU selection | Varies per script |
-| `GIT_LFS_SKIP_SMUDGE` | Skip Git LFS downloads during install | `1` |
+Source `setup_env.sh` at the repo root first — it sets the three machine-specific variables below by auto-detecting profile (gf / sim01 / default). Override any by exporting before sourcing.
+
+| Variable | Purpose | Set by setup_env.sh? |
+|----------|---------|---------------------|
+| `KAI0_DATA_ROOT` | Base dir of deepdive_kai0/kai0 (data/, local checkpoints/) — consumed by `config.py` f-strings | ✅ |
+| `OPENPI_DATA_HOME` | Cache dir for `gs://openpi-assets/...` downloads | ✅ |
+| `PYTORCH_CKPT_BASE` | Root for ADVANTAGE_TORCH PyTorch pretrained weights | ✅ |
+| `XLA_PYTHON_CLIENT_MEM_FRACTION` | JAX GPU memory fraction | — (set per-script, `0.9` for training) |
+| `XLA_PYTHON_CLIENT_PREALLOCATE` | JAX memory preallocation | — (`false`, set in data_loader, model_arithmetic) |
+| `JAX_COMPILATION_CACHE_DIR` | XLA compilation cache | — (`.xla_cache` project-local in start_policy_node.sh) |
+| `JAX_COORDINATOR_ADDRESS` / `JAX_NUM_PROCESSES` / `JAX_PROCESS_INDEX` | Multi-node training entry point (see `train_scripts/launch/run_multinode.sh`) | — |
+| `INLINE_EVAL_*` | **Deprecated** — replaced by TrainConfig fields `inline_eval_val_root/n_frames/every` | — |
+| `CUDA_VISIBLE_DEVICES` | GPU selection | — (varies per script) |
+| `GIT_LFS_SKIP_SMUDGE` | Skip Git LFS downloads during install | — (`1` during install) |
 
 ### Data Layout
 
@@ -171,4 +189,7 @@ Camera keys: `top_head`, `hand_left`, `hand_right`. Observation state is 14-dim 
 
 ## Documentation (`docs/`)
 
-Deployment and reproduction guides: `sim01_deployment.md` (full setup), `teleoperation_guide.md`, `inference_visualization.md`/`inference_visualization_mesh.md` (Rerun visualization), `taskA_master_plan.md` (Task A reproduction plan), `training_reproduction_log.md`.
+Split by environment:
+
+- `docs/deployment/` — sim01 setup and inference: `sim01_deployment.md`, `teleoperation_guide.md`, `inference_visualization.md`/`_mesh.md`, `taskA_master_plan.md`, `official_diff_and_risk_analysis.md`, `analysis_kai0_xvla.md`, `data_manager_plan.md`, `build_web_venv.md`, `ipc_inference_deployment_review.md`, `rerun_mesh_transparency_lesson.md`, `ros2_image_inference_validation_review.md`, `usb_camera_layout.md`
+- `docs/training/` — gf0/gf1/gf2 training plans and reproduction: `training_cli_notes.md` (start here), `taskE_master_plan.md`, `training_reproduction_log.md`, `reproduction_plan.md`, `gf{0,1,2}_*_plan.md`, `multinode_distributed_training_plan.md`, `awbc_{pi07style_experiment,v2_training_plan}.md`, `kai0_{mixed_1_results,task_a_opensource_analysis}.md`, `parallel_execution_plan.md`, `training_plans.md`, `wandb_monitoring.md`

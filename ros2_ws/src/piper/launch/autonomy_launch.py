@@ -129,7 +129,7 @@ def generate_launch_description():
     calib_arg = DeclareLaunchArgument('calibration_config',
         default_value=_DEFAULT_CALIB,
         description='Calibration YAML path (for FK visualization in Rerun)')
-    # ── Rerun mesh visualization (docs/inference_visualization_mesh.md) ──
+    # ── Rerun mesh visualization (docs/deployment/inference_visualization_mesh.md) ──
     # Foreground: per-tick screen-space triangle mesh per camera (replaces
     # legacy point cloud rendering). Background: one-shot TSDF fusion of the
     # static workspace (requires open3d).

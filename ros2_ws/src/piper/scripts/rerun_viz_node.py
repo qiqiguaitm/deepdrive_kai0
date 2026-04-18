@@ -186,7 +186,7 @@ class RerunVizNode(Node):
         # 20 ms on sim01 with reliable QoS.
         self.declare_parameter('sync_rgb_tol_s', 0.03)
         self.declare_parameter('sync_joint_max_gap_s', 0.1)
-        # Foreground mesh (Step 1–4 of docs/inference_visualization_mesh.md).
+        # Foreground mesh (Step 1–4 of docs/deployment/inference_visualization_mesh.md).
         # When fg_enable=True, _tick_point_clouds emits rr.Mesh3D per camera
         # instead of the legacy rr.Points3D path. Kept off by default so the
         # old behaviour is preserved until the mesh path is validated live.
@@ -1081,7 +1081,7 @@ class RerunVizNode(Node):
     def _tick_fg_mesh(self):
         """Dynamic foreground: screen-space triangle mesh per camera.
 
-        See docs/inference_visualization_mesh.md §6. Head camera is bbox
+        See docs/deployment/inference_visualization_mesh.md §6. Head camera is bbox
         clipped; wrist cameras use the full FOV (they are inherently inside
         the workspace). All three cameras pair depth/RGB/joint state via the
         Step 0 ring buffers; unpaired frames are dropped, never rendered

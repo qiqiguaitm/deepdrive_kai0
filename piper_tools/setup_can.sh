@@ -256,5 +256,5 @@ echo "    bash can_tools/setup_can.sh                 # 日常: 仅校准映射 
 echo "    bash can_tools/setup_can.sh --quick         # 最快: 用已有映射直接激活"
 echo "    bash can_tools/setup_can.sh --setup-roles   # 重配 master/slave 角色 + 校准"
 echo "    bash can_tools/setup_can.sh --roles-only    # 仅改角色, 不校准"
-echo "    bash scripts/start_teleop.sh                # 启动遥操"
+echo "    bash start_scripts/start_teleop.sh          # 启动遥操"
 echo "============================================"
