@@ -47,7 +47,7 @@ from openpi_client import image_tools, websocket_client_policy
 CAMERA_NAMES = ["cam_high", "cam_right_wrist", "cam_left_wrist"]
 stream_buffer = None
 observation_window = deque(maxlen=2)
-lang_embeddings = "hang the cloth"
+lang_embeddings = "Fetch and hang the cloth."
 published_actions_history = []
 observed_qpos_history = []
 inferred_chunks = []

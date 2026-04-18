@@ -112,7 +112,7 @@ uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_rtc_flatte
 - **`inference/agilex_inference_openpi_temporal_smoothing.py`**  
   At the top of the file, set the global:
   ```python
-  lang_embeddings = "fold the cloth"   # or your task string
+  lang_embeddings = "Flatten and fold the cloth."   # must match training default_prompt exactly
   ```
   This value is sent as `"prompt"` in the inference payload.
 
@@ -128,13 +128,13 @@ Other inference entrypoints (e.g. sync) also need the same prompt set in their p
 
 Models trained with **Advantage-Weighted Behavior Cloning** (see [stage advantage pipeline](../../../stage_advantage/README.md)) are conditioned on prompts that include an advantage label, e.g.:
 
-- `"<task>, Advantage: negative"`
-- `"<task>, Advantage: positive"`
+- `"Flatten and fold the cloth. Advantage: negative"`
+- `"Flatten and fold the cloth. Advantage: positive"`
 
 At inference you must use the **same format**. For high-advantage behavior use the **positive** form, e.g.:
 
 ```python
-lang_embeddings = "fold the cloth, Advantage: positive"
+lang_embeddings = "Flatten and fold the cloth. Advantage: positive"
 ```
 
 Use the same `<task>` wording as in your training config. Using a different format or omitting the advantage part can hurt performance. See [stage_advantage/README.md — Inference with an AWBC-trained model](../../../stage_advantage/README.md) for details.

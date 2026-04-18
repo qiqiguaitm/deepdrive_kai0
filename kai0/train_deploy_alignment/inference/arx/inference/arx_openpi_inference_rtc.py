@@ -54,7 +54,7 @@ from openpi_client import image_tools, websocket_client_policy
 CAMERA_NAMES = ["cam_high", "cam_right_wrist", "cam_left_wrist"]
 stream_buffer = None
 observation_window = deque(maxlen=2)
-lang_embeddings = "hang the cloth"
+lang_embeddings = "Fetch and hang the cloth."
 rtc_prev_chunk_lock = threading.Lock()
 rtc_prev_chunk = None
 delay_buffer = deque(maxlen=20)

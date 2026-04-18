@@ -138,7 +138,7 @@ Then run the ARX inference script with **`--rtc_mode`** (e.g. `arx_openpi_infere
 
 ## Prompt and AWBC
 
-Set the **language prompt** in the inference script to match training. In the scripts, set the global **`lang_embeddings`** at the top (e.g. `lang_embeddings = "hang the cloth"`). For **AWBC**-trained models, use the same advantage format as in [stage_advantage](../../../stage_advantage/README.md) (e.g. `"<task>, Advantage: positive"`).
+Set the **language prompt** in the inference script to match training. In the scripts, set the global **`lang_embeddings`** at the top (e.g. `lang_embeddings = "Fetch and hang the cloth."`). For **AWBC**-trained models, use the same advantage format as in [stage_advantage](../../../stage_advantage/README.md) (e.g. `"Fetch and hang the cloth. Advantage: positive"`).
 
 ---
 

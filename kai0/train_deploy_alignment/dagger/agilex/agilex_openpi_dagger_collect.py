@@ -54,7 +54,7 @@ last_saved_episode_path = None
 last_saved_episode_idx = None
 last_saved_camera_names = None
 
-lang_embeddings = "fold the cloth"
+lang_embeddings = "Flatten and fold the cloth."
 
 RIGHT_OFFSET = 0.003
 timesteps, actions = [], []
