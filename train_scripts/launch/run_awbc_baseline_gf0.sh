@@ -6,7 +6,7 @@
 # 用法: bash run_single_gf0.sh
 
 CONFIG="pi05_flatten_fold_awbc"
-EXP_NAME="gf0_awbc_baseline_v1"
+EXP_NAME="gf0_awbc_baseline_v2"
 KAI0_ROOT="/vePFS/tim/workspace/deepdive_kai0/kai0"
 LOG_DIR="/vePFS/tim/workspace/deepdive_kai0/logs"
 PYTHON="$KAI0_ROOT/.venv/bin/python3"
@@ -18,7 +18,7 @@ TRAIN_CMD="$PYTHON -u $KAI0_ROOT/scripts/train.py $CONFIG \
   --exp_name=$EXP_NAME \
   --fsdp-devices 8 \
   --batch-size 256 \
-  --resume --no-wandb-enabled"
+  --no-wandb-enabled"
 
 # 单机：不设 JAX_COORDINATOR_ADDRESS，JAX 自动识别 8 本地设备
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY
@@ -31,7 +31,8 @@ unset NCCL_IB_DISABLE NCCL_SOCKET_IFNAME NCCL_IB_HCA NCCL_IB_GID_INDEX \
 # 单机 NCCL：仅需 debug 控制
 export NCCL_DEBUG=WARN
 
-# JAX / XLA
+# JAX / XLA + KAI0 data paths (new config.py needs KAI0_DATA_ROOT set; default is sim01 /data1 path)
+export KAI0_DATA_ROOT=/vePFS/tim/workspace/deepdive_kai0/kai0
 export OPENPI_DATA_HOME=/vePFS/tim/workspace/openpi_cache
 export XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
 export JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS=0

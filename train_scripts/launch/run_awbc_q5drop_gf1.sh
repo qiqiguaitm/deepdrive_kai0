@@ -17,7 +17,7 @@
 
 # ==== 参数配置区（按需修改）====
 CONFIG="pi05_flatten_fold_awbc_q5drop"
-EXP_NAME="gf1_awbc_q5drop_v1"
+EXP_NAME="gf1_awbc_q5drop_v2"
 BATCH_SIZE=256
 FSDP_DEVICES=8
 NODE_IP="192.168.0.161"         # gf1
@@ -37,7 +37,7 @@ TRAIN_CMD="$PYTHON -u $KAI0_ROOT/scripts/train.py $CONFIG \
   --exp_name=$EXP_NAME \
   --fsdp-devices $FSDP_DEVICES \
   --batch-size $BATCH_SIZE \
-  --resume --no-wandb-enabled"
+  --no-wandb-enabled"
 
 # gf1 节点单机启动（通过 gf0 跳板 ssh 到 gf1）
 ssh -p $SSH_PORT root@192.168.0.144 "
@@ -49,6 +49,7 @@ unset NCCL_IB_DISABLE NCCL_SOCKET_IFNAME NCCL_IB_HCA NCCL_IB_GID_INDEX \
       NCCL_IB_RETRY_CNT NCCL_IB_ADDR_FAMILY NCCL_NET_GDR_LEVEL NCCL_ALGO \
       NCCL_IB_PCI_RELAXED_ORDERING
 export NCCL_DEBUG=WARN
+export KAI0_DATA_ROOT=/vePFS/tim/workspace/deepdive_kai0/kai0
 export OPENPI_DATA_HOME=/vePFS/tim/workspace/openpi_cache
 export XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
 export JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS=0
