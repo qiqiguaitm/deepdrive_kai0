@@ -2,7 +2,7 @@
 """Merge N JAX orbax ckpts by simple equal-weight averaging and save as a new ckpt.
 
 Usage:
-    uv run python scripts/ma_average.py \
+    uv run python train_scripts/eval/ma_average.py \
         --ckpts <ckpt1> <ckpt2> [<ckpt3> ...] \
         --out <output_ckpt_dir> \
         [--weights 0.5 0.5]

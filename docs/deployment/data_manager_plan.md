@@ -18,7 +18,7 @@
 - 顶栏「切换到管理员」直接进入，无密码（本机内网部署，信任环境）。
 - **额外解锁**：
   - **任务 / Prompt 模板管理**：新增 / 编辑 / 禁用任务项与 prompt 条目（供采集员下拉使用）。
-  - **Rerun 可视化**：对任意已采 episode 或实时流启动 Rerun viewer（三路视频 + 14 维关节曲线 + 动作指令 + 时间戳对齐），复用 `docs/inference_visualization.md` / `inference_visualization_mesh.md` 管线，按需加载 mesh 版本。
+  - **Rerun 可视化**：对任意已采 episode 或实时流启动 Rerun viewer（三路视频 + 14 维关节曲线 + 动作指令 + 时间戳对齐），复用 `docs/deployment/inference_visualization.md` / `inference_visualization_mesh.md` 管线，按需加载 mesh 版本。
   - 历史 episode 打标 / 删除 / 重命名 / 批量导出。
   - 质检阈值、相机/CAN、存盘路径等配置修改。
   - 后端诊断：ROS2 话题健康、录制 worker 日志、服务重启。
@@ -199,7 +199,7 @@
 5. **统计模块（独立）**：磁盘扫描 + watchdog 增量 + `/api/stats` + 前端卡片。
 6. **模式切换**：采集员 / 管理员双模式（无密码，UI 层权限守卫 + 后端 API 简单角色头）。
 7. **历史 episode 浏览与回放**：列表 / 过滤 / 三路视频同步回放 / 曲线叠加 / 倍速 / 一键复采。
-8. **Rerun 可视化（管理员专属）**：对接 `docs/inference_visualization*.md`，支持实时流与历史 episode 两种入口。
+8. **Rerun 可视化（管理员专属）**：对接 `docs/deployment/inference_visualization*.md`，支持实时流与历史 episode 两种入口。
 9. **质检看板**：阈值告警 + 复采提示。
 10. **联调**：与 `scripts/start_teleop.sh` 串联，跑通一次完整 Task A 采集流程（采集员 + 管理员双角色 E2E）。
 

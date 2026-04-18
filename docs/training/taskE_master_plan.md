@@ -281,7 +281,7 @@ sim01 单卡 5090 目标：chunk(50 步) p50 < 40 ms，p99 < 70 ms。
 
 ### 3.4 Rerun 定性回放
 
-对 9 条 val ep 跑预测 vs GT 动作叠加可视化（`docs/inference_visualization.md`）。挑 MAE 靠前 + 靠后各 1 条对比。
+对 9 条 val ep 跑预测 vs GT 动作叠加可视化（`docs/deployment/inference_visualization.md`）。挑 MAE 靠前 + 靠后各 1 条对比。
 
 ---
 
