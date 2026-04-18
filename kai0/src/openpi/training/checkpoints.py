@@ -22,6 +22,10 @@ def initialize_checkpoint_dir(
 ) -> tuple[ocp.CheckpointManager, bool]:
     checkpoint_dir = epath.Path(checkpoint_dir).resolve()
     resuming = False
+    # Non-primary processes always treat existing dirs as resumable (primary handles creation/overwrite)
+    if jax.process_index() > 0:
+        overwrite = False
+        resume = True
     if checkpoint_dir.exists():
         if overwrite:
             checkpoint_dir.rmtree()
@@ -49,6 +53,7 @@ def initialize_checkpoint_dir(
             keep_period=keep_period,
             create=False,
             async_options=ocp.AsyncOptions(timeout_secs=7200),
+            single_host_load_and_broadcast=True,
         ),
     )
 

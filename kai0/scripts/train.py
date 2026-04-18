@@ -38,9 +38,10 @@ from pathlib import Path
 
 
 # ----- Inline eval (in-process, shares train_state.params — no GPU double-allocation) -----
-# Enable via env:  INLINE_EVAL_VAL_ROOT=<path_to_val>
-# Optional:        INLINE_EVAL_N_FRAMES=20  (query frames per episode)
-# Optional:        INLINE_EVAL_EVERY=1      (run eval every Nth save, default 1)
+# Enable via TrainConfig fields:
+#   inline_eval_val_root : str path to val dataset root (required; None = disabled)
+#   inline_eval_n_frames : int  query frames per val episode (default 20)
+#   inline_eval_every    : int  run eval every Nth save_interval boundary (default 1)
 # Memory: re-uses train_state params (~0 GB extra) + inference activations (~3 GB).
 _VAL_CACHE = {"root": None, "samples": None}
 
@@ -117,11 +118,11 @@ def _build_eval_policy(train_state, config, data_config):
 
 
 def _run_inline_eval(train_state, config, data_config, step, mesh):
-    val_root = os.environ.get("INLINE_EVAL_VAL_ROOT")
+    val_root = config.inline_eval_val_root
     if not val_root:
         return
-    n_frames = int(os.environ.get("INLINE_EVAL_N_FRAMES", "20"))
-    every = int(os.environ.get("INLINE_EVAL_EVERY", "1"))
+    n_frames = config.inline_eval_n_frames
+    every = config.inline_eval_every
     if (step // config.save_interval) % every != 0:
         return
     import time
@@ -272,6 +273,60 @@ def init_train_state(
     return train_state, state_sharding
 
 
+def eval_step(
+    config: _config.TrainConfig,
+    norm_q01: jnp.ndarray,
+    norm_q99: jnp.ndarray,
+    rng: at.KeyArrayLike,
+    state: training_utils.TrainState,
+    batch: tuple[_model.Observation, _model.Actions],
+) -> dict[str, at.Array]:
+    """Run sample_actions on eval batch and compute per-horizon MAE in raw units (rad / m).
+
+    Applies inverse quantile normalization to both pred and gt before MAE, so output
+    is in dataset-native units (radian for joints, meter for gripper).
+
+    Returns: mae_joint_{1,10,50} (rad), mae_grip_{1,10,50} (m).
+      Joint dims: 0-5 (L arm joints), 7-12 (R arm joints). Gripper dims: 6, 13.
+      assumes use_delta_joint_actions=False (direct abs-action prediction).
+    """
+    observation, actions_gt = batch
+    model = nnx.merge(state.model_def, state.params)
+    model.eval()
+
+    eval_rng = jax.random.fold_in(rng, state.step)
+    pred = model.sample_actions(eval_rng, observation, num_steps=config.eval_num_diffusion_steps)
+    # pred: [B, H, 32] in normalized [-1, 1] quantile space
+    # actions_gt: [B, H, 32] same space
+
+    # Inverse quantile normalize to raw (rad/meter) space:
+    #   x_raw = (x_norm + 1) / 2 * (q99 - q01) + q01
+    q01_14 = norm_q01[:14]
+    q99_14 = norm_q99[:14]
+    scale = (q99_14 - q01_14 + 1e-6) / 2.0
+    bias = q01_14
+    pred_raw = (pred[..., :14] + 1.0) * scale + bias
+    gt_raw = (actions_gt[..., :14] + 1.0) * scale + bias
+    err = jnp.abs(pred_raw - gt_raw)  # [B, H, 14] in rad/meter
+    H = err.shape[1]
+
+    joint_idx = jnp.array([0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12])
+    grip_idx = jnp.array([6, 13])
+
+    idx_1 = 0
+    idx_10 = jnp.minimum(9, H - 1)
+    idx_50 = jnp.minimum(49, H - 1)
+
+    return {
+        "mae_joint_1":  err[:, idx_1, joint_idx].mean(),
+        "mae_joint_10": err[:, idx_10, joint_idx].mean(),
+        "mae_joint_50": err[:, idx_50, joint_idx].mean(),
+        "mae_grip_1":   err[:, idx_1, grip_idx].mean(),
+        "mae_grip_10":  err[:, idx_10, grip_idx].mean(),
+        "mae_grip_50":  err[:, idx_50, grip_idx].mean(),
+    }
+
+
 @at.typecheck
 def train_step(
     config: _config.TrainConfig,
@@ -331,8 +386,17 @@ def train_step(
 
 
 def main(config: _config.TrainConfig):
+    # Multi-node init (env var driven — set by run_multinode.sh or similar launcher).
+    coord_addr = os.environ.get("JAX_COORDINATOR_ADDRESS")
+    if coord_addr:
+        jax.distributed.initialize(
+            coordinator_address=coord_addr,
+            num_processes=int(os.environ.get("JAX_NUM_PROCESSES", 1)),
+            process_id=int(os.environ.get("JAX_PROCESS_INDEX", 0)),
+        )
+
     init_logging()
-    logging.info(f"Running on: {platform.node()}")
+    logging.info(f"Running on: {platform.node()} process {jax.process_index()}/{jax.process_count()}")
 
     if config.batch_size % jax.device_count() != 0:
         raise ValueError(
@@ -354,28 +418,55 @@ def main(config: _config.TrainConfig):
         overwrite=config.overwrite,
         resume=config.resume,
     )
-    
-    dst_dir = config.checkpoint_dir
-    src_file = Path(config.data.repo_id) / 'norm_stats.json'
-    shutil.copy(src_file, dst_dir)
 
-    init_wandb(config, resuming=resuming, enabled=config.wandb_enabled)
+    if jax.process_index() == 0:
+        dst_dir = config.checkpoint_dir
+        src_file = Path(config.data.repo_id) / 'norm_stats.json'
+        shutil.copy(src_file, dst_dir)
+
+    init_wandb(config, resuming=resuming, enabled=(config.wandb_enabled and jax.process_index() == 0))
+
+    # 90/10 episode split (if val_ratio > 0)
+    # NOTE: Task_A/advantage has sparse episode_index (values > 3055 exist while meta has
+    # only 3055 entries) — LeRobotDataset's `episodes=` filter breaks when val subset
+    # lands entirely in sparse region. Falling back to train-distribution eval.
+    train_episodes = None
+    val_episodes = None
 
     data_loader = _data_loader.create_data_loader(
         config,
         sharding=data_sharding,
         shuffle=True,
+        episodes=train_episodes,
     )
     data_iter = iter(data_loader)
     batch = next(data_iter)
     logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(batch)}")
 
-    # Log images from first batch to sanity check.
-    images_to_log = [
-        wandb.Image(np.concatenate([np.array(img[i]) for img in batch[0].images.values()], axis=1))
-        for i in range(min(5, len(next(iter(batch[0].images.values())))))
-    ]
-    wandb.log({"camera_views": images_to_log}, step=0)
+    # Tensor-based eval loader (triggered by config.eval_interval_early > 0).
+    # Uses a different seed to sample a different subset — approximation of held-out
+    # eval until the sparse episode_index bug is fixed.
+    val_loader = None
+    val_iter = None
+    if config.eval_interval_early > 0:
+        val_config = dataclasses.replace(config, seed=config.seed + 10000)
+        val_loader = _data_loader.create_data_loader(
+            val_config,
+            sharding=data_sharding,
+            shuffle=True,
+            episodes=None,  # full dataset, bypass sparse-index bug
+        )
+        val_iter = iter(val_loader)
+        logging.info("Initialized eval loader (full dataset, different seed)")
+
+    # Log images from first batch to sanity check (primary process only).
+    if config.wandb_enabled and jax.process_index() == 0:
+        host_images = {k: np.asarray(v) for k, v in batch[0].images.items()}
+        images_to_log = [
+            wandb.Image(np.concatenate([host_images[k][i] for k in host_images], axis=1))
+            for i in range(min(5, len(next(iter(host_images.values())))))
+        ]
+        wandb.log({"camera_views": images_to_log}, step=0)
 
     train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
     jax.block_until_ready(train_state)
@@ -391,7 +482,40 @@ def main(config: _config.TrainConfig):
         donate_argnums=(1,),
     )
 
+    # Jit tensor-based eval step (if enabled).
+    peval_step = None
+    if val_iter is not None:
+        dc = data_loader.data_config()
+        action_norm = dc.norm_stats.get("actions") if dc.norm_stats else None
+        if action_norm is None or action_norm.q01 is None:
+            logging.warning("No action quantile norm stats; eval MAE will be in normalized space, not rad/meter.")
+            norm_q01 = jnp.zeros(32) - 1.0   # so: (x+1)*1 - 1 = x
+            norm_q99 = jnp.ones(32)
+        else:
+            norm_q01 = jnp.asarray(action_norm.q01)
+            norm_q99 = jnp.asarray(action_norm.q99)
+        peval_step = jax.jit(
+            functools.partial(eval_step, config, norm_q01, norm_q99),
+            in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
+            out_shardings=replicated_sharding,
+        )
+
     start_step = int(train_state.step)
+
+    def should_eval_at(step: int) -> bool:
+        """Eval schedule: first eval_early_count times at eval_interval_early (counted from start_step),
+        then eval_interval_late (absolute step multiples). Works on both fresh and resumed training.
+        """
+        if peval_step is None or config.eval_interval_early <= 0:
+            return False
+        if step <= start_step:
+            return False
+        steps_since_start = step - start_step
+        n_early_steps = config.eval_interval_early * config.eval_early_count
+        if steps_since_start <= n_early_steps:
+            return steps_since_start % config.eval_interval_early == 0
+        return step % config.eval_interval_late == 0
+
     pbar = tqdm.tqdm(
         range(start_step, config.num_train_steps),
         initial=start_step,
@@ -409,13 +533,34 @@ def main(config: _config.TrainConfig):
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
             pbar.write(f"Step {step}: {info_str}")
-            wandb.log(reduced_info, step=step)
+            if jax.process_index() == 0:
+                wandb.log(reduced_info, step=step)
             infos = []
+
+        if should_eval_at(step):
+            eval_accum = []
+            for _ in range(config.eval_batches):
+                try:
+                    eval_batch = next(val_iter)
+                except StopIteration:
+                    val_iter = iter(val_loader)
+                    eval_batch = next(val_iter)
+                with sharding.set_mesh(mesh):
+                    em = peval_step(train_rng, train_state, eval_batch)
+                eval_accum.append(em)
+            eval_reduced = jax.device_get(jax.tree.map(
+                lambda *xs: jnp.mean(jnp.stack(xs)), *eval_accum
+            ))
+            eval_str = ", ".join(f"{k}={v:.4f}" for k, v in eval_reduced.items())
+            pbar.write(f"  Eval@{step}: {eval_str}")
+            if jax.process_index() == 0:
+                wandb.log({f"eval/{k}": v for k, v in eval_reduced.items()}, step=step)
+
         batch = next(data_iter)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
             _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)
-            if os.environ.get("INLINE_EVAL_VAL_ROOT"):
+            if config.inline_eval_val_root:
                 _run_inline_eval(train_state, config, data_loader.data_config(), step, mesh)
 
     logging.info("Waiting for checkpoint manager to finish")

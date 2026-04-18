@@ -92,11 +92,14 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, enabled: bool = T
 
 
 def setup_ddp():
+    import datetime
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     use_ddp = world_size > 1
     if use_ddp and not torch.distributed.is_initialized():
         backend = "nccl" if torch.cuda.is_available() else "gloo"
-        torch.distributed.init_process_group(backend=backend, init_method="env://")
+        # Increase timeout to 30 min for slow rank 0 startup (pi05_base loading on shared FS)
+        torch.distributed.init_process_group(backend=backend, init_method="env://",
+                                             timeout=datetime.timedelta(minutes=30))
 
         # Set up debugging environment variables for DDP issues
         if os.environ.get("TORCH_DISTRIBUTED_DEBUG") is None:
