@@ -57,10 +57,14 @@ def read_video_frames(path: Path, n_frames: int) -> np.ndarray:
 HORIZONS = (1, 10, 25, 50)
 
 
-def eval_ckpt(config_name: str, ckpt: Path, val_root: Path, n_sample_frames: int | None) -> dict:
+def eval_ckpt(config_name: str, ckpt: Path, val_root: Path, n_sample_frames: int | None,
+              flow_samples: int = 1) -> dict:
+    """Run val eval. If flow_samples > 1, run the policy that many times per
+    observation (each call uses fresh flow-matching noise) and take the
+    median action — classic 'N-sample ensemble' at inference time."""
     av, _policy_config, _train_config = _lazy_imports()
 
-    print(f"[load] config={config_name}  ckpt={ckpt}")
+    print(f"[load] config={config_name}  ckpt={ckpt}  flow_samples={flow_samples}")
     train_cfg = _train_config.get_config(config_name)
     t0 = time.time()
     policy = _policy_config.create_trained_policy(train_cfg, ckpt)
@@ -100,8 +104,16 @@ def eval_ckpt(config_name: str, ckpt: Path, val_root: Path, n_sample_frames: int
                 "state": state[k],
                 "prompt": "stand up the fallen box",
             }
-            result = policy.infer(obs)
-            pred = np.asarray(result["actions"])  # (chunk_len, 14)
+            if flow_samples <= 1:
+                result = policy.infer(obs)
+                pred = np.asarray(result["actions"])  # (chunk_len, 14)
+            else:
+                samples = []
+                for _ in range(flow_samples):
+                    r = policy.infer(obs)
+                    samples.append(np.asarray(r["actions"]))
+                stacked = np.stack(samples, axis=0)  # (N, chunk, 14)
+                pred = np.median(stacked, axis=0)
             chunk_len = min(pred.shape[0], max(HORIZONS))
             for h in HORIZONS:
                 if h > chunk_len:
@@ -141,14 +153,17 @@ def main():
     ap.add_argument("--val", default="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/val")
     ap.add_argument("--n-sample-frames", type=int, default=200,
                     help="subsample this many query frames per episode (None = all; default 200)")
+    ap.add_argument("--flow-samples", type=int, default=1,
+                    help="N-sample ensemble: run policy.infer N times per obs, take median (default 1)")
     ap.add_argument("--out", default=None, help="output jsonl; default <ckpt>/eval_val.json")
     args = ap.parse_args()
 
     ckpt = Path(args.ckpt).resolve()
     val = Path(args.val).resolve()
-    out = Path(args.out) if args.out else ckpt / "eval_val.json"
+    suffix = f"_N{args.flow_samples}" if args.flow_samples > 1 else ""
+    out = Path(args.out) if args.out else ckpt / f"eval_val{suffix}.json"
 
-    summary = eval_ckpt(args.config, ckpt, val, args.n_sample_frames)
+    summary = eval_ckpt(args.config, ckpt, val, args.n_sample_frames, args.flow_samples)
 
     print("\n=== summary ===")
     for h in HORIZONS:

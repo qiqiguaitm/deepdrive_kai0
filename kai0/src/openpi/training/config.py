@@ -1294,6 +1294,94 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
+    # Task E Phase-2 T1: Vision unfrozen + 2-GPU FSDP, init from E2/14999 (best so far
+    # MAE@1=0.0262). Let SigLIP adapt to Task E camera distribution (box-on-desk views
+    # differ from Task A flatten-fold which this vision was warmed up for).
+    # freeze_filter unfreezes vision tower (PaliGemma.img.*) and AE; only LLM main frozen.
+    TrainConfig(
+        name="pi05_stand_box_vision_fsdp",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma\\.llm.*"),     # freeze only LLM main tower
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),    # keep Action Expert trainable
+            # PaliGemma.img.* path not matched → vision tower trainable
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,   # 2 per-device when fsdp=2
+        fsdp_devices=2,
+    ),
+    # Task E Phase-2 T2: E2/14999 + ultra-low LR 5e-6 + EMA continuation (5k steps).
+    # Squeeze the last fine-tune off E2 using tiny step size, with EMA smoothing.
+    TrainConfig(
+        name="pi05_stand_box_e2_ft",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=200, peak_lr=5e-6, decay_steps=5_000, decay_lr=5e-7
+        ),
+        ema_decay=0.9999,
+        num_train_steps=5_000,
+        keep_period=1_000,
+        save_interval=1_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E Phase-2 T6: kai0_mixed_1 init + base + lowLR + EMA from scratch (15k).
+    # "All known-good tricks from source" — test if training from kai0 init with
+    # EMA+lowLR throughout is better than E2's "default-LR then lowLR continuation".
+    TrainConfig(
+        name="pi05_stand_box_kai0_allgood",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
     # Task E Phase-1 optimization experiments: start from v3/12000 (best so far, MAE@1=0.0333)
     # and try different tricks for 15k additional steps to push MAE@1 toward 0.02.
     # All 4 share the same freeze filter (AE-only) as v3; differ only in {ema, lr, combo}.

@@ -88,6 +88,17 @@ if command -v numactl >/dev/null 2>&1; then
   NUMACTL_CMD="numactl --interleave=0,3 --strict"
 fi
 
+# --- cgroup v2 defense: kernel-level cpuset.mems enforcement ---
+# /sys/fs/cgroup/good-numa (one-time created as root, chown tim) restricts the
+# process tree to nodes 0,3 at the kernel syscall level. Any mbind/numa_alloc
+# to bad nodes is denied by kernel immediately (unlike numactl which can be
+# bypassed by CUDA driver's direct syscalls with explicit NUMA hints).
+CGROUP_PROCS="/sys/fs/cgroup/good-numa/cgroup.procs"
+CGROUP_WRAPPER=""
+if [ -w "$CGROUP_PROCS" ]; then
+  CGROUP_WRAPPER="bash -c 'echo \$\$ > $CGROUP_PROCS; exec \"\$@\"' --"
+fi
+
 # ------ inline eval env ------
 if [ "$ENABLE_EVAL" = "true" ]; then
   export INLINE_EVAL_VAL_ROOT="$VAL_ROOT"
@@ -115,6 +126,7 @@ cat <<EOF
 │ exp_name: $EXP_NAME
 │ GPU:      $GPU
 │ numactl:  ${NUMACTL_CMD:-(disabled - numactl not found)}
+│ cgroup:   ${CGROUP_WRAPPER:+good-numa (cpuset.mems=0,3)}${CGROUP_WRAPPER:-(disabled - $CGROUP_PROCS not writable)}
 │ inline eval: $ENABLE_EVAL${ENABLE_EVAL:+ (val=$VAL_ROOT, N_FRAMES=$N_FRAMES, EVERY=$EVAL_EVERY)}
 │ args:     ${ARGS[@]}
 │ log:      $LOG
@@ -123,7 +135,12 @@ EOF
 
 cd "$KAI0"
 : > "$LOG"
-nohup $NUMACTL_CMD uv run scripts/train.py "$CONFIG" "${ARGS[@]}" > "$LOG" 2>&1 &
+# Subshell: join cgroup first (if writable), then exec the trainer. All forked
+# data-loader workers inherit the cgroup restriction.
+(
+  [ -w "$CGROUP_PROCS" ] && echo $$ > "$CGROUP_PROCS"
+  exec $NUMACTL_CMD uv run scripts/train.py "$CONFIG" "${ARGS[@]}"
+) > "$LOG" 2>&1 &
 PID=$!
 disown
 echo "PID=$PID  $(date)"
