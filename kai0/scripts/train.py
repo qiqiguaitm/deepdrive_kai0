@@ -1,4 +1,5 @@
 import dataclasses
+import faulthandler
 import functools
 import json
 import logging
@@ -7,6 +8,19 @@ import platform
 import subprocess
 import sys
 from typing import Any
+
+# On sim01, training sometimes silently SIGBUSes on GPU 1/2 (0-MB NUMA nodes)
+# when JAX/XLA does a pinned-memory alloc after inline-eval. faulthandler
+# intercepts SIGSEGV/SIGBUS/SIGFPE/SIGILL/SIGABRT and dumps the Python C stack
+# trace to stderr before the process dies, so we can see exactly which call
+# triggers it instead of silent death. No overhead when no fault happens.
+faulthandler.enable(file=sys.stderr, all_threads=True)
+# Also register SIGUSR1 so we can pkill -USR1 <pid> to dump stacks on demand.
+import signal as _signal
+try:
+    faulthandler.register(_signal.SIGUSR1, file=sys.stderr, all_threads=True, chain=False)
+except Exception:
+    pass
 
 import etils.epath as epath
 import flax.nnx as nnx
