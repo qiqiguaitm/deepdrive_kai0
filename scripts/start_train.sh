@@ -138,7 +138,12 @@ cd "$KAI0"
 # Subshell: join cgroup first (if writable), then exec the trainer. All forked
 # data-loader workers inherit the cgroup restriction.
 (
-  [ -w "$CGROUP_PROCS" ] && echo $$ > "$CGROUP_PROCS"
+  # Migrate self into good-numa cgroup (cpuset.mems=0,3). Kernel-level enforce.
+  # /etc/sudoers.d/good-numa allows passwordless `sudo tee` on cgroup.procs only.
+  # $BASHPID = current subshell (not $$ which is parent shell, already exited).
+  if [ -e "$CGROUP_PROCS" ]; then
+    sudo -n tee "$CGROUP_PROCS" <<< "$BASHPID" > /dev/null 2>&1 || true
+  fi
   exec $NUMACTL_CMD uv run scripts/train.py "$CONFIG" "${ARGS[@]}"
 ) > "$LOG" 2>&1 &
 PID=$!
