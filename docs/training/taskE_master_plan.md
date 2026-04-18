@@ -1,23 +1,38 @@
 # kai0 Task E 主规划 — 扶起倒箱 (stand up the fallen box)
 
-> **作用**: Task E 全流程方案 —— 训练（本机 4×5090，四路单卡差异化实验并行）+ 离线评测（inline + archive）+ 真机部署。
+> **作用**: Task E 全流程方案 —— 训练（本机 4×5090，差异化实验并行）+ 离线评测（inline + archive）+ 真机部署。
 > **硬件**: sim01 本地 4× RTX 5090 32GB（driver 580 / CUDA 13）；数据盘 `/data1` 可用 5.5 TB；62 GiB RAM。
-> **关联文档**: [taskA_master_plan.md](taskA_master_plan.md)（集群/部署基线）, [sim01_deployment.md](sim01_deployment.md)。
-> **创建 / 最近更新**: 2026-04-18（v3: v2 基线完成 → 四卡差异化实验 v3/v4/v5/v8 + inline eval in-process 共享 params）
+> **关联文档**: [taskA_master_plan.md](../deployment/taskA_master_plan.md), [sim01_deployment.md](../deployment/sim01_deployment.md)。
+> **创建 / 最近更新**: 2026-04-19（v4：Phase 1 完成 / Phase 2 pivot 到 LoRA）
 
 ---
 
-## TL;DR
+## TL;DR — 当前状态（2026-04-19）
 
-| 实验 | GPU | init | 数据 | 动作 | 备注 |
-|---|---|---|---|---|---|
-| **v2 基线** | — | pi05_base | base (64 ep) | abs + freeze | ✅ 已完成，step 14k MAE@1=0.0411 |
-| **v3** | GPU1 | kai0_mixed_1（Task A MA）| base | abs + freeze | 测 kai0 init 迁移效果 |
-| **v4** | GPU2 | pi05_base | base_full_aug (256 ep，mirror+time) | abs + freeze | 测数据增强增益上限 |
-| **v5** | GPU3 | kai0_mixed_1 | base_full_aug | abs + freeze | v3+v4 的乘法 |
-| **v8** | GPU0 | pi05_base | base_merged (128 ep，仅 mirror) | abs + freeze | v4 消融：仅空间镜像，验证 time_scaling 边际 |
+**最佳单模 single-sample MAE@1 = 0.0262**（E2 v3+lowLR, Phase 1），相对 v2 基线 0.0411 改善 **-36%**。
 
-**差异化因子**：`init × 数据量` 2×2，加 v8 做 v4 的消融。所有实验共同约束：abs + freeze-backbone（action expert 可训），15k 步，batch=4，seed=42，inline eval 每 2k 步。
+**已完成阶段**：
+| 阶段 | 结论 |
+|---|---|
+| **Phase 0** v2 基线（pi05_base + base, 15k 步）| ✅ 完成 @1=0.0411 |
+| **Phase 1 - 差异化 2×2**（v3/v4/v5/v8，init × data）| ✅ 完成 —— **v3 kai0+base** 胜出 @1=0.0333，**time_scaling 负贡献**，aug 在小数据上 marginal |
+| **Phase 1 - v3 续训 fine-tune**（E1/E2/E3/E4 四手段并行）| ✅ 完成 —— **E2 v3+lowLR** 胜出 @1=0.0262，**lowLR 是主力，EMA 次之** |
+
+**Phase 2 进行中**（当前）：
+| 实验 | 状态 | 目标 |
+|---|---|---|
+| **T1-1** vision MLP LoRA r=16（E2 init） | 🟢 GPU 0 跑中 | 解冻 vision 的轻量方案 |
+| **T1-2** vision MLP LoRA r=32（E2 init） | 🟢 GPU 3 跑中 | rank sweep |
+| **T2** E2 + ultra-lowLR + EMA（5k 步） | ⏸️ 待 T1-1/T1-2 完成后排队 | 极小 LR fine-tune |
+| **T6** kai0_mixed_1 + all-good-tricks 从头 15k | ⏸️ 同上 | 完整组合从源头训 |
+| ~~T1 vision 全解冻 + FSDP~~ | ❌ 放弃 | 32 GB 5090 装不下（OOM during jit init）|
+
+**硬件墙 & 绕法**（全部踩过）：
+- 5090 32 GB：**全 vision 解冻 OOM**，所有组合（FSDP=2 bs=2 MEM_FRACTION=0.98）都差 72 MB 越不过；LoRA 是唯一可行路径
+- sim01 **NUMA 0/2 无 DIMM**：GPU 1/2 在 inline-eval 后 **SIGSEGV**，user-space 修复（numactl, cgroup v2 cpuset.mems, --interleave --strict）**全部拦不住**；faulthandler 能捕 C 栈但不能阻止
+- 路径：只用 **GPU 0 + GPU 3**（健康 NUMA）；坏卡只能跑**无 inline-eval** 的 smoke
+
+**下一步目标**：LoRA 若 @1 < 0.024 → 部署；否则考虑 DAgger（用户已排除）或接受 @1 ≈ 0.025 做真机
 
 
 ---
@@ -62,13 +77,24 @@ NUMA node 2:  0 MB RAM, CPUs 16-23,48-55    ❌ 空插槽，无 DIMM
 NUMA node 3: 32 GB RAM, CPUs 24-31,56-63    ✅
 ```
 
-CUDA 驱动按 PCIe 拓扑把 GPU1/GPU2 绑到 node 1/2。JAX/XLA/NCCL 做 `cudaMallocHost` pinned memory 时在 0-byte 节点悄悄失败 → `ncclGroupEnd() illegal memory access`。**穷举用户态绕法（numactl bind、NCCL env、XLA flags、NCCL 升级）全部失败**。
+CUDA 驱动按 PCIe 拓扑把 GPU1/GPU2 绑到 node 1/2。JAX/XLA 做 pinned memory 分配时在 0-byte 节点悄悄失败 → **inline-eval 后 SIGSEGV/SIGBUS**（Phase 1 E3/E4、Phase 2 T2 多次重现）。
 
-**最终绕法（本 v3 采用）**：**不做 FSDP，单卡一个实验，四卡跑四个差异化实验**。
-- 每张卡一个独立 JAX 进程，没有跨卡 NCCL collectives，pinned memory 只在本卡 NUMA 内分配
-- 只要当前卡分到 node 0 或 node 3 的流量是各自进程自己的事，不再相互污染
-- 实测四路训练稳定（v2 在 GPU0 单卡跑到 25k 步）
-- 代价：batch_size 每卡上限 4（冻 backbone 下）；总吞吐和单机 4 卡 FSDP batch=16 等价，但每实验 wall-clock 更长
+**用户态修复尝试（全部失败）**：
+| 防御层 | 结果 | 备注 |
+|---|---|---|
+| `numactl --membind=0,3 --cpunodebind=0,3` | 死 step 4000 | 同挂 |
+| `numactl --interleave=0,3 --strict` | 死 step 8000 | 推迟 1 轮 eval |
+| **cgroup v2 `cpuset.mems=0,3`** | 死 step 1000 | 内核级也拦不住 |
+| `faulthandler.enable()` | **能捕 C 栈** | 诊断有效但不阻止；显示死在 `_run_inline_eval` 返回后 train loop resume |
+
+**根因**：JAX/XLA/CUDA driver 的 `cudaHostAlloc(..., numa_local)` 带**显式 NUMA hint** 直接 syscall，kernel 按命令去 0-byte 节点分配 → SIGBUS。numactl 的 policy 优先级在这些 syscall 下面，cgroup cpuset.mems 也绕不过 driver 显式 hint。
+
+**唯一可靠路径**：**只用 GPU 0 + GPU 3**（NUMA 3 / NUMA 0 健康）。GPU 1/2 仅限**无 inline-eval** 的 smoke。DIMM 补齐后可回到 4 卡全用。
+
+**每卡一个实验**（不做跨卡 FSDP）：
+- 每卡独立 JAX 进程，无跨卡 NCCL collectives
+- 单卡 batch=4（冻 backbone）~21 GB 稳
+- 两个健康 GPU → 每轮最多 2 个实验并行，其他排队
 
 **DIMM 补齐后**可回到 4-GPU FSDP 单实验 batch=16 的高吞吐路线，参见 §附录 B。
 
@@ -139,6 +165,61 @@ ema_decay=None,   # 冻 backbone 下 EMA 意义不大，省 ~6.5 GB/卡
 共同超参：`batch_size=4 / num_workers=2 / fsdp_devices=1 / num_train_steps=15000 / save_interval=2000 / keep_period=5000 / seed=42 / ema_decay=None`。
 
 **kai0_mixed_1 init 路径**：`/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params`。这是 Task A 上用等权 Model Arithmetic 合并的 4 个 split 的权重，在同硬件平台上 Warmed up，理论上迁移到 Task E 优于 GCS 裸 pi05_base。
+
+### 2.3.1 Phase 1 结果（2×2 差异化 2026-04-18）
+
+v3/v4/v5/v8 最终 single-sample MAE@1 / @50：
+
+| 排名 | exp | init | 数据 | best step | **@1** | @10 | @25 | @50 |
+|---|---|---|---|---:|---:|---:|---:|---:|
+| 🥇 | **v3 kai0+base** | kai0_mixed_1 | base (64) | **12000** | **0.0333** | 0.0514 | 0.0775 | 0.1164 |
+| 🥈 | v5 kai0+aug | kai0_mixed_1 | full_aug (256) | 14999 | 0.0351 | 0.0552 | 0.0881 | 0.1329 |
+| 🥉 | v8 pi05+mirror | pi05_base | mirror (128) | 14000 | 0.0421 | 0.0598 | 0.0876 | 0.1283 |
+| 4 | v4 pi05+aug | pi05_base | full_aug | 10000 | 0.0452 | 0.0677 | 0.0978 | 0.1350 |
+| —— v2 基线（pi05+base）| | | | 14000 | 0.0411 | — | — | — |
+
+**核心结论**：
+1. **init 因子主导**：kai0_mixed_1 比 pi05_base 提升 **20–26% @1**（v3 vs v4；v5 vs v8）。Task A warmed-up backbone 对 Task E 的迁移效果显著。
+2. **time_scaling 负贡献**：v8 (mirror only) > v4 (full aug)，v3 (base) > v5 (aug)。time_scaling 稀释信号、在 64 ep 小数据上伤害长 horizon。
+3. **kai0 init 5× 加速**：v3 在 step 2k 就达 @1=0.0427，接近 v2 step 14k 的 0.0411。
+
+### 2.3.2 Phase 1 v3 续训（E1/E2/E3/E4 微调 trick 2026-04-18）
+
+从 v3/12000 init 再训 15k 步，测 4 个 fine-tune 手段：
+
+| exp | 变化 | FINAL @1 | vs v3/12000 基线 | 趋势 |
+|---|---|---:|---:|---|
+| 🥇 **E2** v3+**lowLR**（peak_lr 2.5e-5 → 1.25e-5） | 0.0262 | **-21.3%** | 连续 6 ckpt 单调下降 |
+| 🥈 E1 v3+**EMA**（decay=0.9999） | 0.0297 | -10.8% | 单调缓慢收敛 |
+| E3 v3+EMA+lowLR combo | 0.0290 (step 8k, dead) | -13% | EMA 后期起效但 GPU 1 NUMA 崩 |
+| E4 v3+**long**（纯续训 default LR）| 0.0327 | -2% | 平台震荡（默认 LR 对已收敛权重是破坏）|
+
+**核心结论**：
+1. **lowLR 是最有效 fine-tune**：默认 LR 在已收敛权重上会 overshoot；半 LR 稳推。
+2. **EMA 单独只有 10% 增益**，combo 中 EMA 加持 lowLR 但不显著超越。
+3. **E2 的 @1=0.0262 是当前 single-sample 最强**，成为 Phase 2 起点。
+
+### 2.3.3 Phase 2 训练端突破（进行中 2026-04-19）
+
+目标：压 @1 < 0.025，不使用 ensemble/MA/DAgger。
+
+| exp | 策略 | 可训参数 | 预期 @1 | GPU | 状态 |
+|---|---|---|---|---|---|
+| **T1-1** | vision MLP LoRA r=16（E2 init） | AE 750M + LoRA ~4.5M | -4 到 -7% | GPU 0 | 🟢 跑中 |
+| **T1-2** | vision MLP LoRA r=32（E2 init） | AE 750M + LoRA ~9M | -5 到 -8% | GPU 3 | 🟢 跑中 |
+| **T2** | E2 + ultra-lowLR 5e-6 + EMA (5k 步) | 750M | -2 到 -5% | ⏸️ 排队 | 待 GPU 0/3 空 |
+| **T6** | kai0 + base + lowLR + EMA 从头 15k | 750M | -3 到 -7% | ⏸️ 排队 | 同上 |
+| ~~T1 vision 全解冻 FSDP~~ | 1.15B trainable | -5 到 -12% | — | ❌ 放弃 | 32 GB 装不下 |
+
+**关键设计**：
+- **LoRA 只加在 MLP 两个 Dense**（不加 attention）。rank=16 / 32 覆盖 27 个 SigLIP block，每 block 2 条 LoRA 分支。
+- **freeze_filter**: `All(PaliGemma, Not(llm.*_1), Not(lora_[ab]))` → 冻原 PaliGemma，放 AE + LoRA。
+- **init from E2/14999 params**：LoRA 权重全零初始化（接近 identity），接力 E2 继续训。
+
+**决策门**：
+- LoRA r=16 step 4k @1 < 0.025 → 继续跑完
+- r=16 无改善但 r=32 有 → rank 有效，r=32 跑完
+- 两者都 < 2% 增益 → vision 非瓶颈，停在 E2，考虑 DAgger/真机
 
 ### 2.4 数据增强 pipeline
 
