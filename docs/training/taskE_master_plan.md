@@ -3,7 +3,7 @@
 > **作用**: Task E 全流程方案 —— 训练（本机 4×5090，差异化实验并行）+ 离线评测（inline + archive）+ 真机部署。
 > **硬件**: sim01 本地 4× RTX 5090 32GB（driver 580 / CUDA 13）；数据盘 `/data1` 可用 5.5 TB；62 GiB RAM。
 > **关联文档**: [taskA_master_plan.md](../deployment/taskA_master_plan.md), [sim01_deployment.md](../deployment/sim01_deployment.md)。
-> **创建 / 最近更新**: 2026-04-19（v4：Phase 1 完成 / Phase 2 pivot 到 LoRA）
+> **创建 / 最近更新**: 2026-04-19（v5：Phase 2 vision MLP LoRA 验证通过 @1=0.0260，展开 Pipeline B）
 
 ---
 
@@ -18,14 +18,29 @@
 | **Phase 1 - 差异化 2×2**（v3/v4/v5/v8，init × data）| ✅ 完成 —— **v3 kai0+base** 胜出 @1=0.0333，**time_scaling 负贡献**，aug 在小数据上 marginal |
 | **Phase 1 - v3 续训 fine-tune**（E1/E2/E3/E4 四手段并行）| ✅ 完成 —— **E2 v3+lowLR** 胜出 @1=0.0262，**lowLR 是主力，EMA 次之** |
 
-**Phase 2 进行中**（当前）：
-| 实验 | 状态 | 目标 |
-|---|---|---|
-| **T1-1** vision MLP LoRA r=16（E2 init） | 🟢 GPU 0 跑中 | 解冻 vision 的轻量方案 |
-| **T1-2** vision MLP LoRA r=32（E2 init） | 🟢 GPU 3 跑中 | rank sweep |
-| **T2** E2 + ultra-lowLR + EMA（5k 步） | ⏸️ 待 T1-1/T1-2 完成后排队 | 极小 LR fine-tune |
-| **T6** kai0_mixed_1 + all-good-tricks 从头 15k | ⏸️ 同上 | 完整组合从源头训 |
-| ~~T1 vision 全解冻 + FSDP~~ | ❌ 放弃 | 32 GB 5090 装不下（OOM during jit init）|
+**Phase 2 结果 & 进行中**：
+
+| 实验 | best @1 | vs E2 | 结论 |
+|---|---:|---:|---|
+| **T1-1** vision MLP LoRA r=16（E2 init）| **0.0260** @ 15k | **-0.8%** | ✅ LoRA 微幅超过 E2，但 init bug 限制潜力 |
+| **T1-2** vision MLP LoRA r=32（E2 init）| 0.0261 @ 15k | -0.4% | rank 增加无显著差异 |
+| **T2** E2 + ultra-lowLR + EMA | 0.0261 @ step 1-2k | ~flat | 饱和（E2 已收敛，无空间 fine-tune）|
+| **T6** kai0_mixed_1 + allgood 从头 | 🟢 GPU 3 跑中 | — | 独立 baseline check |
+| **T7** LoRA r=16 + **fixed init(w_b=0)** + **25k 步** + **base_merged(128 ep)** | 🟢 GPU 0 跑中 | 预期 -15~25% | Pipeline B phase-a |
+| ~~T1 vision 全解冻 + FSDP~~ | — | — | ❌ 32 GB 装不下，LoRA 是唯一可行路径 |
+
+**Pipeline B (2026-04-19 进行)** —— 目标压 @1 < 0.024，不用 ensemble/MA/DAgger：
+
+| 阶段 | 实验 | 预期 @1 | 成本 | 状态 |
+|---|---|---|---|---|
+| B-1 | **T7** fixed-init + 25k + base_merged | 0.022-0.025 | 4.5h 训 | 🟢 进行中 GPU 0 |
+| B-2 | **T8** DoRA + MLP LoRA（T7 ckpt / E2 起） | 0.021-0.023 | 1-2h 代码 + 3h 训 | ⏸️ B-1 后 |
+| B-3 | **T9** MHA LoRA + MLP LoRA（attention 补覆盖）| 0.020-0.023 | 2-3h 代码 + 3h 训 | ⏸️ B-1 后（可选）|
+
+**B-1 的 3 个关键升级**（核心新发现 2026-04-19）：
+1. **LoRA init 修复**：w_b = zeros（原 normal(0.01) 导致 step 0-4k 扰动，浪费 ~5% 潜力）
+2. **数据扩到 base_merged**：mirror aug 第一次真正流入 vision（之前 vision 冻结时 mirror 信号无处可去）
+3. **25k vs 15k**：T1-1 step 14k→14999 仍在 -1.2%/2k 下降，没触底
 
 **硬件墙 & 绕法**（全部踩过）：
 - 5090 32 GB：**全 vision 解冻 OOM**，所有组合（FSDP=2 bs=2 MEM_FRACTION=0.98）都差 72 MB 越不过；LoRA 是唯一可行路径
@@ -497,3 +512,47 @@ CUDA_VISIBLE_DEVICES=0 \
 
 **现状（2026-04-18）**：通过"单卡一个实验、四卡跑四个实验"绕过 NCCL 崩溃，吞吐按实验数补偿。
 **DIMM 补齐路线**：socket 1 + socket 2 各补 1 根 DIMM（≥8 GB 任意频率），`numactl --hardware` 确认 4 个 node 都有 MemTotal > 0 后可回到 4-GPU FSDP batch=16 单实验高吞吐模式。
+
+## 附录 C：后续改进路线候选（深度调研 2026-04-19）
+
+按 **EV / 成本** 排序，从 E2 = 0.0262 baseline 继续压精度的方案（**不用 ensemble / MA / DAgger**）：
+
+### Tier 1（当前 Pipeline B）—— 立即可做
+
+| ID | 手段 | 预期 Δ@1 | 代码 | 训练 | 状态 |
+|---|---|---|---|---|---|
+| **T7** | fixed-init LoRA r=16 + base_merged + 25k | -15~25% | 已完成 | 4.5h | 🟢 进行中 |
+| **T8** | **DoRA**（weight-decomposed LoRA）on MLP | -3~5% 额外 | 1-2h | 3h | ⏸️ T7 后 |
+| **T9** | **MHA LoRA**（给 Q/K/V/O 加 rank=16） | -2~5% 额外 | 2-3h | 3h | ⏸️ 可选 |
+| T10 | **AdamW weight_decay 1e-4 → 0.01** | -1~3% | 1 行 | 3h | 可叠加 |
+
+### Tier 2（需更大算力）
+
+| ID | 手段 | 预期 Δ@1 | 成本 |
+|---|---|---|---|
+| T11 | **远程 gf0/gf1 (8×A100 80GB)** 全 vision 解冻 + 25k | -5~12% | 数据传输 1h + 5h 训 |
+| T12 | **Horizon-weighted loss**（@1-@10 加权 1.5×）| -1~3% | 5 行 + 3h |
+
+### Tier 3（边际 / 长期）
+
+- T13 **rsLoRA**：alpha=r·√r（r≥64 时显优，r=16 无差）
+- T14 **LoRA dropout**：p=0.1 在 LoRA 分支
+- T15 **Curriculum learning**：eps 按难度排序
+- T16 **多任务 co-train** with Task A 数据（kai0_mixed_1 已部分吸收）
+
+### Pipeline B 决策树
+
+```
+T7 完成 →
+  @1 < 0.024 → 停，真机验证
+  0.024 ≤ @1 < 0.028 → T8 (DoRA) 叠加
+  @1 ≥ 0.028 → T9 (MHA LoRA) + T10 (wd) 联合
+所有 Tier 1 跑完仍 > 0.020 → T11 远程全解冻（最后大杀器）
+```
+
+### 核心认知（2026-04-19 发现）
+
+1. **LoRA init 至关重要**：w_b = zeros 是 identity start 的前提。normal init 导致 step 0-4k 扰动 E2 已收敛权重，损失 ~5% 潜力。
+2. **Mirror aug 的激活条件**：vision 冻结时，mirror 对 SigLIP 没有信号（输入改但 feature 不变），AE 学的只是 action swap；LoRA 解冻后 mirror 才真正帮 vision 学左右对称。
+3. **rank 不是瓶颈**（Task E 场景）：r=16 vs r=32 在 T1-1/T1-2 同步到 0.0001 差异。说明 Task A→Task E 的视觉 delta 用 r=16 就够，**升 rank 不如加 MHA coverage 或换 DoRA**。
+4. **单卡 5090 32 GB 是硬墙**：全 vision 解冻（1.15B trainable opt state ~9 GB + params ~6.6 GB + 其它 ~10 GB = 峰值 > 32 GB）OOM 不可绕；LoRA / DoRA / 部分解冻是唯一软件路径。
