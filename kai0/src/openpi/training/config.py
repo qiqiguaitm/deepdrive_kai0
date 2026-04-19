@@ -1471,7 +1471,7 @@ _CONFIGS = [
         name="pi05_stand_box_vision_lora16_v2",
         model=pi0_config.Pi0Config(pi05=True, vision_mlp_lora_rank=16, vision_mlp_lora_alpha=16.0),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base_merged",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
