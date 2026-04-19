@@ -1671,6 +1671,64 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
+    # Task E Phase-3 T15: T10 recipe (T6+25k) extended to 40k steps.
+    # T10 @1 step 24999=0.0233 still trending down (-0.0001/1k). Linear extrap to 40k -> 0.021-0.022.
+    TrainConfig(
+        name="pi05_stand_box_kai0_allgood_40k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=40_000, decay_lr=1.25e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=40_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E Phase-3 T16: T10 recipe + high weight_decay (1e-10 -> 1e-2).
+    # openpi default weight_decay=1e-10 is effectively zero regularization.
+    # 64 ep + 750M trainable params is ripe for overfit; wd=1e-2 should help.
+    TrainConfig(
+        name="pi05_stand_box_kai0_allgood_wd2",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=25_000, decay_lr=1.25e-6
+        ),
+        optimizer=_optimizer.AdamW(weight_decay=1e-2, clip_gradient_norm=1.0),
+        ema_decay=0.9999,
+        num_train_steps=25_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
     # Task E Phase-2 T6: kai0_mixed_1 init + base + lowLR + EMA from scratch (15k).
     # "All known-good tricks from source" — test if training from kai0 init with
     # EMA+lowLR throughout is better than E2's "default-LR then lowLR continuation".
