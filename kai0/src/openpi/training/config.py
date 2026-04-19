@@ -1463,6 +1463,36 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
+    # Task E Phase-2 T7: v2 of T1-1 with fixed LoRA init (w_b=zeros, identity start).
+    # First T1-1 run reached @1=0.0260 despite step 2-4k disruption from non-zero w_b.
+    # With proper zero init, step 0 is exactly E2 (0.0262), so LoRA only improves from there.
+    TrainConfig(
+        name="pi05_stand_box_vision_lora16_v2",
+        model=pi0_config.Pi0Config(pi05=True, vision_mlp_lora_rank=16, vision_mlp_lora_alpha=16.0),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+            nnx.Not(nnx_utils.PathRegex(".*lora_[ab].*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
     # Task E Phase-2 T1-1: MLP-only vision LoRA rank=16 (init from E2/14999, 15k steps).
     # LoRA adapters on every SigLIP MlpBlock's 2 Dense layers. Vision main weights +
     # LLM main frozen; trainable = AE (~700M) + vision MLP LoRA (~4-5M).

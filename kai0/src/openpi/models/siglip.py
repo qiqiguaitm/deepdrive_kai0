@@ -70,12 +70,14 @@ class MlpBlock(nn.Module):
         _, _, d = x.shape  # n,l,d
         h = self.mlp_dim or 4 * d
 
+        # Standard LoRA init: w_a random (small gaussian), w_b zeros.
+        # Initial BA = 0 so model is *identical* to base at step 0.
         x_in = x
         x = nn.Dense(h, dtype=self.dtype_mm, **inits)(x)
         if self.lora_config:
             r = self.lora_config.rank
             w_a = self.param("Dense_0_lora_a", self.lora_config.init_fn, (d, r))
-            w_b = self.param("Dense_0_lora_b", self.lora_config.init_fn, (r, h))
+            w_b = self.param("Dense_0_lora_b", nn.initializers.zeros, (r, h))
             x = x + (x_in @ w_a.astype(x.dtype)) @ w_b.astype(x.dtype) * self.lora_config.scaling_value
 
         x = nn.gelu(x)
@@ -86,7 +88,7 @@ class MlpBlock(nn.Module):
         if self.lora_config:
             r = self.lora_config.rank
             w_a = self.param("Dense_1_lora_a", self.lora_config.init_fn, (h, r))
-            w_b = self.param("Dense_1_lora_b", self.lora_config.init_fn, (r, d))
+            w_b = self.param("Dense_1_lora_b", nn.initializers.zeros, (r, d))
             x = x + (x_mid @ w_a.astype(x.dtype)) @ w_b.astype(x.dtype) * self.lora_config.scaling_value
         return x
 
