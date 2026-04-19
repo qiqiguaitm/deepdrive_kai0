@@ -1611,6 +1611,66 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
+    # Task E Phase-3 T10: T6 recipe extended to 25k steps (from 15k).
+    # T6 @1 trajectory: 12k=0.0262, 14k=0.0252, 14999=0.0245. Rate slowing but still
+    # improving. Extrapolate: 25k predicted ~0.022-0.024. Only change: num_train_steps
+    # and decay_steps both -> 25k so cosine properly decays to decay_lr at end.
+    TrainConfig(
+        name="pi05_stand_box_kai0_allgood_25k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=25_000, decay_lr=1.25e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=25_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E Phase-3 T14: T6 recipe + vision MLP LoRA r=16 (fixed init, w_b=0).
+    # Test whether LoRA adds orthogonal value to the winning EMA+lowLR-from-kai0 stack.
+    # T6 baseline @1=0.0245. If T14 < 0.023 -> LoRA additive. If ≥ 0.0245 -> LoRA redundant.
+    TrainConfig(
+        name="pi05_stand_box_kai0_allgood_lora16",
+        model=pi0_config.Pi0Config(pi05=True, vision_mlp_lora_rank=16, vision_mlp_lora_alpha=16.0),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+            nnx.Not(nnx_utils.PathRegex(".*lora_[ab].*")),      # keep LoRA trainable
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
     # Task E Phase-2 T6: kai0_mixed_1 init + base + lowLR + EMA from scratch (15k).
     # "All known-good tricks from source" — test if training from kai0 init with
     # EMA+lowLR throughout is better than E2's "default-LR then lowLR continuation".
