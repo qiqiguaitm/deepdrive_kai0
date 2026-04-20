@@ -176,9 +176,16 @@ def preprocess_observation(
     train: bool = False,
     image_keys: Sequence[str] = IMAGE_KEYS,
     image_resolution: tuple[int, int] = IMAGE_RESOLUTION,
+    augment_level: str = "mild",
 ) -> Observation:
     """Preprocess the observations by performing image augmentations (if train=True), resizing (if necessary), and
     filling in a default image mask (if necessary).
+
+    augment_level:
+        "mild":       default. RandomCrop(0.95) + Rotate(±5°) on non-wrist only; ColorJitter(0.3,0.4,0.5) on all.
+        "aggressive": for deploy-robustness (D435→D405, pose/arm spacing variation).
+                      Non-wrist: RandomCrop(0.85) + Rotate(±10°). Wrist: Rotate(±8°) + RandomCrop(0.90).
+                      All: ColorJitter(0.5,0.6,0.8) + stronger color variation.
     """
 
     if not set(image_keys).issubset(observation.images):
@@ -198,16 +205,35 @@ def preprocess_observation(
             image = image / 2.0 + 0.5
 
             transforms = []
-            if "wrist" not in key:
-                height, width = image.shape[1:3]
+            height, width = image.shape[1:3]
+            if augment_level == "aggressive":
+                # Geometric (both wrist and non-wrist get aug to handle D435↔D405 + pose shift).
+                if "wrist" not in key:
+                    transforms += [
+                        augmax.RandomCrop(int(width * 0.85), int(height * 0.85)),
+                        augmax.Resize(width, height),
+                        augmax.Rotate((-10, 10)),
+                    ]
+                else:
+                    transforms += [
+                        augmax.RandomCrop(int(width * 0.90), int(height * 0.90)),
+                        augmax.Resize(width, height),
+                        augmax.Rotate((-8, 8)),
+                    ]
+                # Stronger color (D435 ↔ D405 sensor differences).
                 transforms += [
-                    augmax.RandomCrop(int(width * 0.95), int(height * 0.95)),
-                    augmax.Resize(width, height),
-                    augmax.Rotate((-5, 5)),
+                    augmax.ColorJitter(brightness=0.5, contrast=0.6, saturation=0.8),
                 ]
-            transforms += [
-                augmax.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5),
-            ]
+            else:  # mild (default)
+                if "wrist" not in key:
+                    transforms += [
+                        augmax.RandomCrop(int(width * 0.95), int(height * 0.95)),
+                        augmax.Resize(width, height),
+                        augmax.Rotate((-5, 5)),
+                    ]
+                transforms += [
+                    augmax.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5),
+                ]
             sub_rngs = jax.random.split(rng, image.shape[0])
             image = jax.vmap(augmax.Chain(*transforms))(sub_rngs, image)
 

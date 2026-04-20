@@ -13,13 +13,13 @@ from pathlib import Path
 
 LOG_DIR = "/vePFS/tim/workspace/deepdive_kai0/logs"
 GF0_GLOB = "gf0_awbc_baseline_*.log"
-GF1_GLOB = "gf1_awbc_q5drop_*.log"
+GF1_GLOB = "gf1_dct_v4_*.log"
 GF0_SSH = ["ssh", "-p", "2222", "root@192.168.0.144"]
 GF1_SSH = ["ssh", "-p", "2222", "root@192.168.0.144",
            "ssh", "-p", "2222", "-i", "/root/.ssh/ssh_worker_rsa_key",
            "-o", "StrictHostKeyChecking=no", "root@192.168.0.161"]
 
-STEP_RE = re.compile(r"^Step (\d+): grad_norm=([\d.]+), loss=([\d.]+), param_norm=([\d.]+)")
+STEP_RE = re.compile(r"^Step (\d+):(.*)")
 TQDM_RE = re.compile(r"\[I\] Progress on:\s*(\S+)it/(\S+)kit rate:(\S+) remaining:(\S+) elapsed:(\S+)")
 SKIP_RE = re.compile(r"Skipping check_timestamps_sync")
 EVAL_RE = re.compile(r"Eval@(\d+):\s*(.+)$")
@@ -46,10 +46,21 @@ def parse_log(path):
         for ln in f:
             m = STEP_RE.search(ln)
             if m:
-                data["steps"].append(int(m.group(1)))
-                data["grad"].append(float(m.group(2)))
-                data["loss"].append(float(m.group(3)))
-                data["pnorm"].append(float(m.group(4)))
+                step = int(m.group(1))
+                kvs = {}
+                for kv in m.group(2).split(","):
+                    kv = kv.strip()
+                    if "=" in kv:
+                        k, v = kv.split("=", 1)
+                        try:
+                            kvs[k.strip()] = float(v.strip())
+                        except ValueError:
+                            pass
+                if "loss" in kvs and "grad_norm" in kvs and "param_norm" in kvs:
+                    data["steps"].append(step)
+                    data["loss"].append(kvs["loss"])
+                    data["grad"].append(kvs["grad_norm"])
+                    data["pnorm"].append(kvs["param_norm"])
                 continue
             m = TQDM_RE.search(ln)
             if m:

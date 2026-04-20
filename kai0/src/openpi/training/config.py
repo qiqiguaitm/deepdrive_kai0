@@ -2156,6 +2156,96 @@ _CONFIGS = [
         eval_early_count=3,
         eval_batches=4,
     ),
+    #**************************FlattenFold AWBC v2 (v5: advantage + dagger + space-mirror, 12,024 ep)*******************************
+    # Per docs/training/awbc_v2_training_plan.md:
+    #   Data = advantage (3055) + dagger_labeled (3457) + space-mirror of each = 4× sources merged.
+    #   dagger is heuristic-labeled as "Advantage: positive" (Option B: DAgger = policy-corrected trajectories).
+    #   Online image aug unchanged (default _AUGMENT_D435 in model.py); CameraAugConfig deferred to v2.1.
+    #   No time_scaling: breaks 50-frame absolute_advantage label semantics (per v2 plan Sec 3.1).
+    # Expected delta vs gf0 baseline:
+    #   - 3.9× data, reducing over-fit on 3055 expert-only trajectories
+    #   - Mirror teaches bimanual L/R symmetry prior (task is genuinely symmetric)
+    #   - DAgger adds policy-distribution OOD coverage, improving deploy robustness
+    TrainConfig(
+        name="pi05_flatten_fold_awbc_v2",
+        # v2 (no-mirror): advantage (3055) + dagger_advantage (3457) = awbc_v2_full (6512 ep).
+        # Mirror skipped per taskE v8 ablation (neutral/slight-negative) + D405 asymmetry risk.
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/awbc_v2_full",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        keep_period=5000,
+        num_workers=16,
+        batch_size=256,
+        val_ratio=0.1,
+        eval_interval_early=100,
+        eval_interval_late=1000,
+        eval_early_count=3,
+        eval_batches=4,
+    ),
+    # Deploy-robustness variant: same data as awbc_v2, aggressive image aug
+    # (RandomCrop 0.85/0.90, Rotate ±10°/±8°, ColorJitter 0.5/0.6/0.8) to handle
+    # D435↔D405 sensor swap + slight pose/arm-spacing variation at deployment.
+    # No state noise augmentation (per user instruction).
+    TrainConfig(
+        name="pi05_flatten_fold_awbc_v2_robust",
+        model=pi0_config.Pi0Config(pi05=True, augment_level="aggressive"),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/awbc_v2_full",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        keep_period=5000,
+        num_workers=16,
+        batch_size=256,
+        val_ratio=0.1,
+        eval_interval_early=100,
+        eval_interval_late=1000,
+        eval_early_count=3,
+        eval_batches=4,
+    ),
+    #**************************FlattenFold DCT-only (v4: conservative, DCT frequency regularization)*******************************
+    # Earlier v3 (cl_dct, RS-CL + DCT) empirically failed: CL weight 0.3 × initial
+    # cl_loss=5.56 = 1.67 dominated early gradients and pushed VLM features toward
+    # proprio encoding, hurting main task (eval MAE +40-100% worse than gf0 at
+    # Step 6000). RS-CL code has since been removed from Pi0/Pi0Config.
+    # v4 keeps ONLY the DCT frequency loss: weighted contribution stayed <1% of
+    # main loss throughout v3 observation, so it cannot meaningfully hurt. Upside
+    # is small but >= 0: smooth-action bias matches the slow cloth-manip task.
+    TrainConfig(
+        name="pi05_flatten_fold_dct_only",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            use_dct_loss=True,
+            dct_loss_weight=0.1,
+            dct_low_freq_weight=1.0,
+            dct_high_freq_weight=0.2,
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/advantage",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=100_000,
+        keep_period=5000,
+        num_workers=16,
+        batch_size=256,
+        val_ratio=0.1,
+        eval_interval_early=100,
+        eval_interval_late=1000,
+        eval_early_count=3,
+        eval_batches=4,
+    ),
     #**************************TeeShirtSort AWBC*******************************
     TrainConfig(
         name="pi05_tee_shirt_sort_awbc",

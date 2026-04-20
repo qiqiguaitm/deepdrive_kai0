@@ -642,3 +642,5 @@ class AdvantageEstimator(PI0Pytorch):
         value_pred = self.value_head(deep_rep)
             
         return value_pred
+# Alias for backward compat with evaluator.py (expects PI0Pytorch_Custom).
+PI0Pytorch_Custom = AdvantageEstimator

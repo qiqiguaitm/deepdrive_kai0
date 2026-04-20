@@ -16,6 +16,23 @@ from openpi.shared import array_typing as at
 logger = logging.getLogger("openpi")
 
 
+def _dct2_last_time_axis(x: jnp.ndarray) -> jnp.ndarray:
+    """Orthonormal DCT-II along axis=-2 (time). x shape [..., T, D]. Returns same shape.
+
+    Uses direct matmul implementation: O(T^2) per-element but fine for T~50.
+    Formula: y_k = alpha_k * sum_n x_n * cos(pi * (n+0.5) * k / T)
+    with alpha_0 = sqrt(1/T), alpha_{k>0} = sqrt(2/T).
+    """
+    T = x.shape[-2]
+    n = jnp.arange(T, dtype=x.dtype)
+    k = jnp.arange(T, dtype=x.dtype)
+    kernel = jnp.cos(jnp.pi * (n[:, None] + 0.5) * k[None, :] / T)  # [T, T]
+    scale = jnp.full((T,), jnp.sqrt(2.0 / T), dtype=x.dtype).at[0].set(jnp.sqrt(1.0 / T))
+    kernel = kernel * scale[None, :]
+    # Contract over time axis: x [..., T, D] @ kernel [T, T] -> [..., T, D]
+    return jnp.einsum("...td,tk->...kd", x, kernel)
+
+
 def make_attn_mask(input_mask, mask_ar):
     """Adapted from big_vision.
 
@@ -107,6 +124,12 @@ class Pi0(_model.BaseModel):
             self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
+        self.use_dct_loss = getattr(config, "use_dct_loss", False)
+        if self.use_dct_loss:
+            self._dct_loss_weight = config.dct_loss_weight
+            self._dct_low_freq_weight = config.dct_low_freq_weight
+            self._dct_high_freq_weight = config.dct_high_freq_weight
+
         # This attribute gets automatically set by model.train() and model.eval().
         self.deterministic = True
 
@@ -196,9 +219,21 @@ class Pi0(_model.BaseModel):
     @override
     def compute_loss(
         self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
-    ) -> at.Float[at.Array, "*b ah"]:
+    ):
+        """Flow-matching loss. Returns per-sample-per-horizon tensor OR a dict when aux losses are enabled.
+
+        Return formats:
+          - No aux flags set: Float[*b, ah]  (unchanged historical behavior)
+          - use_dct_loss=True: dict containing
+              'main_loss' : Float[*b, ah]   flow-matching MSE
+              'dct_loss'  : scalar          DCT-MSE
+              'dct_weight': scalar          weight for summing
+        """
         preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
-        observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
+        observation = _model.preprocess_observation(
+            preprocess_rng, observation, train=train,
+            augment_level=getattr(self.config, "augment_level", "mild"),
+        )
 
         batch_shape = actions.shape[:-2]
         noise = jax.random.normal(noise_rng, actions.shape)
@@ -219,7 +254,30 @@ class Pi0(_model.BaseModel):
         )
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
-        return jnp.mean(jnp.square(v_t - u_t), axis=-1)
+        main_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
+
+        if not self.use_dct_loss:
+            return main_loss
+
+        out = {"main_loss": main_loss}
+
+        if self.use_dct_loss:
+            # DCT-II on time axis; weight low/high frequencies differently to
+            # penalise high-frequency jitter more than low-frequency structure.
+            freqs_v = _dct2_last_time_axis(v_t)
+            freqs_u = _dct2_last_time_axis(u_t)
+            T = v_t.shape[-2]
+            denom = max(T - 1, 1)
+            freq_idx = jnp.arange(T, dtype=v_t.dtype) / denom
+            weights = (
+                self._dct_low_freq_weight * (1.0 - freq_idx)
+                + self._dct_high_freq_weight * freq_idx
+            )
+            dct = jnp.mean(weights[None, :, None] * jnp.square(freqs_v - freqs_u))
+            out["dct_loss"] = dct
+            out["dct_weight"] = jnp.asarray(self._dct_loss_weight, dtype=dct.dtype)
+
+        return out
 
     @override
     def sample_actions(

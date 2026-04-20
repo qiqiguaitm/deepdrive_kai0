@@ -1,11 +1,33 @@
 # AWBC π0.7-style 实验方案与跟进
 
 **创建时间**: 2026-04-18
-**状态**: 训练中（gf0 baseline + gf1 **Option A: Quality only, no dropout** 并行）
+**状态**: ⛔ **SUPERSEDED / FAILED** — 后继方案见 [awbc_v2_training_plan.md](awbc_v2_training_plan.md)
 **负责人**: Tim
 
-> **[2026-04-18 更新]** Step 5000 eval 显示 dropout=15% 版本在多数指标上落后 gf0 baseline。
-> 已 kill gf1, dropout 0.15 → 0.0，resume from step 5000。详见第十节。
+## 最终结论（2026-04-19 收敛）
+
+| 变体 | 数据 | prompt | 结果 |
+|---|---|---|---|
+| v1 (q5drop) | advantage_q5 | Quality 1-5 + 15% dropout | **失败**：eval MAE ≈ gf0 baseline |
+| v2 (Option A) | advantage_q5 | Quality 1-5 + 0% dropout | **失败**：eval joint MAE 略差于 gf0 |
+| v3 (cl_dct) | advantage | binary + RS-CL + DCT 辅助 loss | **严重失败**：eval MAE +40~100% 差于 gf0 |
+| v4 (dct_only) | advantage | binary + DCT only | 未跑完，转 v5 |
+
+## 根因总结
+
+1. **demo-only 数据 advantage 方差 η²=3%**，Quality prompt 信号本就极弱
+2. **多桶 Quality 离散化 = noisy signal 再加量化误差**，模型直接学会忽略 prompt
+3. **RS-CL 辅助 loss 在 flow-matching 上梯度竞争**：0.3×cl_loss=1.67 在 step 0 = 2× main loss, VLM features 被拉向 proprio 编码方向，破坏主任务
+4. **DCT 辅助 loss 安全但增益极小**（weighted contribution <1% main loss）
+
+## 可继承经验（写给 v2 plan）
+
+- ✅ π0.5 flow-matching 对"输入端改 prompt"或"表示层 aux loss"都**脆弱**
+- ✅ 提升应走**数据侧**（mirror / DAgger 合并 / 在线增强）或**优化侧**（EMA 已在用）
+- ✅ Advantage binary prompt 比 5-bin 稳定，v2 plan 保留 binary
+- ❌ Time-scaling 破坏 advantage label 语义，不可用
+
+下面的原始方案和日志保留作历史参考，**不要再按此方向实施**。
 
 ---
 

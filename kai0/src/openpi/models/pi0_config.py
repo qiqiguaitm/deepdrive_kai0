@@ -38,6 +38,20 @@ class Pi0Config(_model.BaseModelConfig):
     vision_mlp_lora_rank: int | None = None
     vision_mlp_lora_alpha: float = 16.0
 
+    # DCT frequency-domain loss on predicted actions (VLANeXt arXiv 2602.18532).
+    # Penalizes high-frequency action jitter and emphasizes smooth trajectories.
+    # Complements flow-matching MSE which weights all frequencies equally.
+    use_dct_loss: bool = False
+    dct_loss_weight: float = 0.1
+    # Weights for lowest vs highest DCT frequency. Linearly interpolated across bins.
+    # low_freq=1.0, high_freq=0.2 means low freqs counted 5x more than high freqs.
+    dct_low_freq_weight: float = 1.0
+    dct_high_freq_weight: float = 0.2
+
+    # Image augmentation level for training: "mild" (default) or "aggressive".
+    # "aggressive" is for deploy-robustness (D435→D405, pose/arm-spacing variation).
+    augment_level: str = "mild"
+
     def __post_init__(self):
         if self.max_token_len is None:
             object.__setattr__(self, "max_token_len", 200 if self.pi05 else 48)

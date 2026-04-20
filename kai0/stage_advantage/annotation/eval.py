@@ -101,6 +101,10 @@ def parse_args():
                         help='Model variant: PI06 (single-timestep) / KAI0 (two-timestep stage-level)')
     parser.add_argument('repo_id', type=str,
                         help='Path to the LeRobot dataset')
+    parser.add_argument('--num-workers', type=int, default=1,
+                        help='Total workers for sharding (shard = ep_idx %% num_workers)')
+    parser.add_argument('--worker-id', type=int, default=0,
+                        help='This worker index [0, num_workers)')
     return parser.parse_args()
 
 
@@ -158,7 +162,12 @@ def main():
 
         dataset_metadata = lerobot_dataset.LeRobotDatasetMetadata(repo_id=repo_id)
 
-        for i in tqdm(range(dataset_metadata.total_episodes), desc="Evaluating episodes"):
+        # Shard episodes across workers (ep_idx % num_workers == worker_id)
+        num_workers = getattr(args, 'num_workers', 1)
+        worker_id = getattr(args, 'worker_id', 0)
+        all_eps = range(dataset_metadata.total_episodes)
+        my_eps = [e for e in all_eps if e % num_workers == worker_id]
+        for i in tqdm(my_eps, desc=f"Evaluating (w{worker_id}/{num_workers})"):
             parquet_file = repo_id / dataset_metadata.data_path.format(
                 episode_chunk=i // dataset_metadata.chunks_size, episode_index=i
             )
@@ -167,14 +176,15 @@ def main():
                 continue
 
             # Resolve video paths for all three camera views
+            # LeRobot v2.1 uses feature-prefixed dir names, e.g. observation.images.top_head/
             top_video = repo_id / dataset_metadata.video_path.format(
-                episode_chunk=i // dataset_metadata.chunks_size, episode_index=i, video_key='top_head'
+                episode_chunk=i // dataset_metadata.chunks_size, episode_index=i, video_key='observation.images.top_head'
             )
             left_video = repo_id / dataset_metadata.video_path.format(
-                episode_chunk=i // dataset_metadata.chunks_size, episode_index=i, video_key='hand_left'
+                episode_chunk=i // dataset_metadata.chunks_size, episode_index=i, video_key='observation.images.hand_left'
             )
             right_video = repo_id / dataset_metadata.video_path.format(
-                episode_chunk=i // dataset_metadata.chunks_size, episode_index=i, video_key='hand_right'
+                episode_chunk=i // dataset_metadata.chunks_size, episode_index=i, video_key='observation.images.hand_right'
             )
             if not top_video.exists() or not left_video.exists() or not right_video.exists():
                 print(f"Missing video file(s) for episode {i}, skipping")

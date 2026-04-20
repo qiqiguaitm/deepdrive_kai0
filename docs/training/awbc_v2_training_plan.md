@@ -1,5 +1,21 @@
 # awbc_v2 训练计划
 
+**状态**: 🔄 **实施中** (2026-04-19)
+**决策**: Option 1 — gf0 继续跑 v1 作 baseline，gf1 切换到 v2 全量数据 + Mirror，获得干净 A/B 对比
+**弃用的平行路线**: [awbc_pi07style_experiment.md](awbc_pi07style_experiment.md) (v1/v2/v3 all 失败)
+
+## 实施进度
+
+| 步骤 | 状态 |
+|---|---|
+| 1. 生成 Task_A/advantage_mirror（3055 ep Mirror 翻转）| ⏳ 待办 |
+| 2. 生成 Task_A/dagger_mirror（3457 ep Mirror 翻转）| ⏳ 待办 |
+| 3. 合并 4 份 → Task_A/advantage_v2 (12,024 ep)| ⏳ 待办 |
+| 4. compute_norm_states_fast 生成 norm_stats | ⏳ 待办 |
+| 5. 新 TrainConfig `pi05_flatten_fold_awbc_v2` | ⏳ 待办 |
+| 6. CameraAugConfig 参数化（可延后）| ⏳ 可选 |
+| 7. 启动脚本 + 启动 gf1_awbc_v2_v1 | ⏳ 待办 |
+
 ## 背景与决策依据
 
 ### 为什么不做 Model Arithmetic
