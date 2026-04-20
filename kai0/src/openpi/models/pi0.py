@@ -124,6 +124,8 @@ class Pi0(_model.BaseModel):
             self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
+        # Store augment_level so compute_loss can read it (Pi0 doesn't keep full config).
+        self.augment_level = getattr(config, "augment_level", "mild")
         self.use_dct_loss = getattr(config, "use_dct_loss", False)
         if self.use_dct_loss:
             self._dct_loss_weight = config.dct_loss_weight
@@ -232,7 +234,7 @@ class Pi0(_model.BaseModel):
         preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
         observation = _model.preprocess_observation(
             preprocess_rng, observation, train=train,
-            augment_level=getattr(self.config, "augment_level", "mild"),
+            augment_level=self.augment_level,
         )
 
         batch_shape = actions.shape[:-2]
