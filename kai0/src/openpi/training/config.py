@@ -1514,7 +1514,7 @@ _CONFIGS = [
             nnx.Not(nnx_utils.PathRegex(".*lora_[ab].*")),   # keep LoRA adapters trainable
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
         ),
         ema_decay=None,
         num_train_steps=15_000,
@@ -1542,7 +1542,7 @@ _CONFIGS = [
             nnx.Not(nnx_utils.PathRegex(".*lora_[ab].*")),
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
         ),
         ema_decay=None,
         num_train_steps=15_000,
@@ -1573,7 +1573,7 @@ _CONFIGS = [
             # PaliGemma.img.* path not matched → vision tower trainable
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
         ),
         ema_decay=None,
         num_train_steps=15_000,
@@ -1641,6 +1641,94 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
+    # Task P Stage 2: 8k steps + 2× LR + EMA 0.999 (mature EMA by step 2000).
+    # Based on Stage 1 unfreeze_2k (MAE@1=0.0362 EMA); targets MAE@1 < 0.015.
+    # ema=0.999 half-life=700 → EMA fully mature after step ~2000.
+    # peak_lr=2.5e-5 = 2× Stage 1 (pi05 paper defaults, batch=128 can handle).
+    TrainConfig(
+        name="pi05_pick_place_box_kai0_unfreeze_8k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_P/base",
+            default_prompt="pick and place in box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=2.5e-5, decay_steps=8_000, decay_lr=2.5e-6
+        ),
+        ema_decay=0.999,
+        num_train_steps=8_000,
+        keep_period=1_000,
+        save_interval=1_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_P/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task P vision-unfreeze full-param (gf0 8×A100). Init from Task_A mixed_1.
+    # Mirror of pi05_stand_box_kai0_unfreeze_2k but for pick-and-place-in-box (Task_P).
+    # 2000 steps × bs128 = 256k samples ~= 10 epochs on 85 train ep × 300 frames = 25.5k samples.
+    TrainConfig(
+        name="pi05_pick_place_box_kai0_unfreeze_2k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_P/base",
+            default_prompt="pick and place in box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        # no freeze_filter → default nnx.Nothing → all params trainable
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=2_000,
+        keep_period=500,
+        save_interval=500,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_P/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task E vision-unfreeze full-param (gf1 8×A100). Init from Task_A mixed_1.
+    # T10 recipe (EMA+lowLR) but freeze_filter=None → vision+LLM+AE all trainable.
+    # 2000 steps × bs128 = 256k samples ~= 3.6 epochs (T10 was bs4×25k = 100k = 1.4ep).
+    # keep_period=500 preserves all 4 eval points, saves us from Task_P lost-best-ckpt bug.
+    TrainConfig(
+        name="pi05_stand_box_kai0_unfreeze_2k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        # no freeze_filter → default nnx.Nothing → all params trainable
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=2_000,
+        keep_period=500,
+        save_interval=500,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_E/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
     # Task E Phase-3 T14: T6 recipe + vision MLP LoRA r=16 (fixed init, w_b=0).
     # Test whether LoRA adds orthogonal value to the winning EMA+lowLR-from-kai0 stack.
     # T6 baseline @1=0.0245. If T14 < 0.023 -> LoRA additive. If ≥ 0.0245 -> LoRA redundant.
@@ -1661,7 +1749,7 @@ _CONFIGS = [
             nnx.Not(nnx_utils.PathRegex(".*lora_[ab].*")),      # keep LoRA trainable
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
         ),
         ema_decay=0.9999,
         num_train_steps=15_000,
@@ -1867,7 +1955,7 @@ _CONFIGS = [
             nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
         ),
         ema_decay=0.9999,
         num_train_steps=15_000,
@@ -1921,7 +2009,7 @@ _CONFIGS = [
             nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
         ),
         ema_decay=None,
         num_train_steps=15_000,
@@ -1948,7 +2036,7 @@ _CONFIGS = [
             nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
         ),
         ema_decay=0.9999,
         num_train_steps=15_000,
@@ -2243,6 +2331,32 @@ _CONFIGS = [
         eval_early_count=3,
         eval_batches=4,
     ),
+    #**************************FlattenFold AWBC dagger-only (ablation: isolate DAgger-only contribution to AWBC)*******************************
+    # Same config as pi05_flatten_fold_awbc except:
+    #   - repo_id points at Task_A/dagger_advantage (3457 ep, dagger-only half of awbc_v2_full)
+    #   - num_train_steps=30_000 to align with awbc_v2 run budget (comparable steps & data scale)
+    # Purpose: A/B vs gf0_awbc_baseline_v2 (base-only 3055 ep) and awbc_v2 (base+dagger 6512 ep)
+    # to attribute the base↔dagger data contribution to final eval MAE.
+    TrainConfig(
+        name="pi05_flatten_fold_awbc_daggeronly",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/dagger_advantage",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        keep_period=5000,
+        num_workers=16,
+        batch_size=256,
+        val_ratio=0.1,
+        eval_interval_early=100,
+        eval_interval_late=1000,
+        eval_early_count=3,
+        eval_batches=4,
+    ),
     #**************************FlattenFold AWBC (Option A: 5-bin Quality, stage-aware, no dropout)*******************************
     # Variant of pi05_flatten_fold_awbc using:
     #   - n_slices=5 advantage discretization with "Quality: 1/5..5/5" prompt
@@ -2330,6 +2444,46 @@ _CONFIGS = [
         eval_interval_late=1000,
         eval_early_count=3,
         eval_batches=4,
+    ),
+    #**************************FlattenFold AWBC from official MA checkpoint (β-official)*******************************
+    # Warm-start AWBC fine-tune from the official MA product (Task_A/mixed_1, HF release).
+    # Goal: approximate the paper's MA+SA combination — "MA first, then SA on top of MA".
+    # Data: Task_A/advantage (3055 ep base with advantage labels), following official AWBC recipe
+    # (dagger has no official advantage, so AWBC stays on base only).
+    # Norm stats: from checkpoints/Task_A/mixed_1/norm_stats.json (compatible with mixed_1 weights).
+    # LR peak 1e-5 (2.5x lower than default) + warmup 1000 to preserve MA's "smooth" behavior
+    # while adapting to the new AWBC prompt suffix (mixed_1 was BC-trained with no "Advantage: ...").
+    TrainConfig(
+        name="pi05_flatten_fold_awbc_from_official_mixed",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/advantage",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+            assets=AssetsConfig(
+                assets_dir=f"{_KAI0_DATA_ROOT}/checkpoints/Task_A",
+                asset_id="mixed_1",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        num_train_steps=20_000,
+        keep_period=5000,
+        num_workers=16,
+        batch_size=256,
+        val_ratio=0.1,
+        eval_interval_early=100,
+        eval_interval_late=1000,
+        eval_early_count=3,
+        eval_batches=4,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=1.0e-5,
+            decay_steps=20_000,
+            decay_lr=1.0e-6,
+        ),
     ),
     #**************************FlattenFold DCT-only (v4: conservative, DCT frequency regularization)*******************************
     # Earlier v3 (cl_dct, RS-CL + DCT) empirically failed: CL weight 0.3 × initial
