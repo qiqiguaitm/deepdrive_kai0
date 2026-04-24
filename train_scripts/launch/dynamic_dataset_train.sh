@@ -9,8 +9,10 @@
 #   3) regenerates episodes_stats + norm_stats,
 #   4) restarts the same experiment with --resume (keeps step/opt/EMA state).
 #
-# Training is launched OUTSIDE this script (so initial --overwrite run is user-
-# controlled). This script only handles the resume cycle triggered by data grow.
+# Training is launched OUTSIDE this script (initial run uses --resume, which auto
+# falls back to weight_loader if no ckpts exist). This script only handles the
+# resume cycle triggered by data grow. NEVER use --overwrite — it rmtrees the
+# entire exp dir and wipes ALL step ckpts irreversibly.
 #
 # Deploy on gf1 and run in background:
 #   nohup /tmp/dynamic_dataset_train.sh > /tmp/dyn_train.log 2>&1 &

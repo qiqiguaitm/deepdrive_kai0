@@ -19,7 +19,9 @@ done
 cd /vePFS/tim/workspace/deepdive_kai0/kai0
 
 echo "[train] === START $(date) ==="
+# NOTE: --resume preserves all existing ckpts; do NOT use --overwrite (it rmtrees entire exp dir).
+# First run auto-falls back to weight_loader when no ckpts exist yet.
 .venv/bin/python scripts/train.py pi05_flatten_fold_mixed_visrobot01 \
   --exp_name=mixed_visrobot01_v1 \
-  --overwrite 2>&1
+  --resume 2>&1
 echo "[train] === END $(date) ==="
