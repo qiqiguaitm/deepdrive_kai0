@@ -1788,7 +1788,7 @@ _CONFIGS = [
     # Used by dynamic dataset workflow (train_scripts/launch/dynamic_dataset_train.sh).
     # Data built by train_scripts/data/build_task_a_mixed.py (equal N per source).
     # With --val-size 21 → stratified 7-ep val per source.
-    # Init from Task_A/mixed_1 (kai0 MA-merged, 90% real-robot baseline).
+    # Init from the clean cached pi05_base checkpoint on this host.
     TrainConfig(
         name="pi05_flatten_fold_mixed_visrobot01",
         model=pi0_config.Pi0Config(pi05=True),
@@ -1798,7 +1798,7 @@ _CONFIGS = [
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+            f"{_KAI0_DATA_ROOT}/.cache/openpi/openpi-assets/checkpoints/pi05_base/params"
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=500, peak_lr=1.5e-5, decay_steps=12_000, decay_lr=1.5e-6
