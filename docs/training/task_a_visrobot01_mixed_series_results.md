@@ -18,7 +18,8 @@
 | 3 | visrobot01_only_v1 (Phase A) | gf1 | 9k | Task_A_visrobot01_only (193 train+17 val) | 8000-9000 | 0.0179 | step 8-9k plateau, dataset 路径迁移导致 crash |
 | 4 | visrobot01_only_v1 (Phase B, --resume) | gf1 | 9k → 12k | Task_A_visrobot01_only (288 train+22 val, vis_base 重建) | **11999** | **0.0171** | 续训突破 plateau, 4.5% 改善 |
 | 5 | **mix_vis600_v1** ✅ | gf0 | 40k | mix_vis600 (310 vis + 145 base + 145 dagger; 540 train+59 val) | **36000-39999 tied** | **0.0146** | 训完 33:21 hr, plateau @ step 30k |
-| 6 | **pure_vis600_v1** ⏳ | gf1 | 40k 部分 | pure_vis600 (309 orig + 291 hflip mirror; 560 train+40 val) | (running, step 13.7k @ 0.0201) | (TBD) | 步速慢 (8.4 s/step h264+av1 解码), 短期内不会完成 |
+| 6 | **pure_vis600_v1** ⏳ | gf1 | 40k | pure_vis600 (309 orig + 291 hflip mirror; 560 train+40 val) | (running, step 30k @ 0.0156) | (TBD) | 修复 codec 后 2.5 s/step; ETA Tue 23:45 CST |
+| 7 | **vis_base_40k_v1** ⏳ | gf0 | 40k | vis_base 310 ep ONLY (288 train+22 val, no mirror, no kai0) | (running, step 22k @ 0.0176) | (TBD) | 启动 Mon 13:25 CST, ETA Wed 01:20 CST |
 
 ⏳ = 训练中, ✅ = 已完成
 
@@ -286,7 +287,7 @@ train loss 持续单调降, param_norm 缓增 (训练健康)。
 
 ---
 
-## 5. pure_vis600 (gf1, 40k 长训) ⏳ **进行中, 步速过慢**
+## 5. pure_vis600 (gf1, 40k 长训) ⏳ **进行中, 75% 完成 (codec 修复后正常步速)**
 
 ### 5.1 实验设定
 
@@ -306,57 +307,166 @@ train loss 持续单调降, param_norm 缓增 (训练健康)。
 | ema_decay | 0.9999 (同) |
 | save_interval / keep_period | 2000 / 2000 (同) |
 
-### 5.2 训练状态 (2026-04-27 08:21 CST 更新)
+### 5.2 训练状态 (2026-04-28 10:32 CST 更新)
 
-- 启动: 2026-04-25 23:09 CST (15:09 UTC)
-- 当前 step: **13,700 / 40,000** (34% — Mon 08:00 CST 时点)
-- 步速: **~8.4 s/step** (gf0 mix_vis600 同期是 2.0 s/step, **慢 4×**!)
-- ckpts 保存: step 2k/4k/6k/8k/10k/12k (6 个, 待续)
-- ETA 完成 (按当前速度): Wed 23:00 CST (远超 deadline)
-- **决策**: 让训练继续, deadline (Mon 09:00 CST) 时不会跑完, 但已有 6+ inline-eval 数据点足以做 trend 对比
+| 阶段 | 时点 | step | 步速 | 备注 |
+|---|---|---:|---|---|
+| 初次启动 | Mon 04-25 23:09 CST | 0 | — | — |
+| 慢速期 (codec issue) | Mon → Tue 早期 | → 14,000 | ~8.4 s/step ⚠️ | 共 36:48 hr 跑了 14k 步 |
+| **codec 修复** | **Mon 04-27 12:00 CST** | step 14000 ckpt | — | 再编码 873 mirror mp4 |
+| Resume + 加速 | Mon 12:08 CST 起 | 14000 → 30200 | **2.5 s/step** ✓ | 与 mix_vis600 同速 |
+| 当前 | Tue 10:32 CST | **30,200 / 40,000 (75.5%)** | — | 还剩 9.8k 步 |
+| **新 ETA** | — | — | — | **Tue ~23:45 CST** |
 
-### 5.3 步速慢分析
+### 5.3 codec 步速问题分析与修复
 
-| 项 | 状态 |
-|---|---|
-| GPU util | 100% × 8 (非 I/O 瓶颈) ✓ |
-| dataloader skip | 0 (数据干净) ✓ |
-| CPU load | 19+ (8 worker 各 122-188% CPU) |
-| memory | 676 GB / 1.9 TB total ✓ |
+**问题**: 启动后训练 8.4 s/step, 比 mix_vis600 (2.0 s/step) 慢 4×。
 
-**最可能原因**: pure_vis600 视频 codec 混合 — originals 是 av1 (vis_base 原始), mirrors 是 h264 (libx264 重编码)。PyAV 在混合 codec 路径上每帧 decode 慢 3-4× (推测). gf0 mix_vis600 几乎全 av1 (kai0 源也是 av1) 因此快很多。
+**诊断结论** (排除假设):
+- ❌ codec 不同: 都是 h264 yuv420p, 都有 B-frames
+- ❌ moov atom 位置: 都在文件末尾 99.6%
+- ❌ GPU/IO 瓶颈: GPU 100% util
+- ✅ **真正瓶颈: random-seek decode 速度** — mirrors 0.85ms vs orig 0.95ms 几乎相同 (修复后), 但**修复前 mirrors 是 3.16ms/seek (3.3× 慢)**
 
-### 5.4 inline-eval 历史 (截至 step 13.7k)
+**根因**: build_task_a_pure_vis600.py 默认用 `libx264 preset=veryfast` 重编 mirrors → 复杂 B-frame 引用链 + 不规则 GOP → 每次 random seek 解多帧才能到 target frame。
 
-| step | MAE@1 | @10 | @25 | @50 | Δ |
-|---:|---:|---:|---:|---:|---:|
-| 2000 | 0.0268 | 0.0589 | 0.1074 | 0.1698 | (起点) |
-| 4000 | 0.0254 | 0.0522 | 0.0911 | 0.1433 | -5.2% |
-| 6000 | 0.0238 | 0.0466 | 0.0778 | 0.1191 | -6.3% |
-| 8000 | 0.0222 | 0.0422 | 0.0684 | 0.1017 | -6.7% |
-| 10000 | 0.0211 | 0.0391 | 0.0621 | 0.0904 | -5.0% |
-| **12000** | **0.0201** | 0.0367 | 0.0577 | 0.0829 | -4.7% |
-| 14000 | (即将, ~Mon 03:00 UTC) | — | — | — | — |
+**修复 (2026-04-27 12:00 CST)**:
+```bash
+ffmpeg -i <mirror.mp4> -c:v libx264 \
+  -preset ultrafast -bf 0 \
+  -x264opts keyint=15:min-keyint=15:scenecut=0 \
+  -pix_fmt yuv420p -an <out.mp4>
+```
+- `-bf 0`: 0 B-frames (无 backward 依赖)
+- `keyint=15`: 每 15 帧一个 keyframe (max seek-back 距离有界)
+- 873 files × 16 并行 ffmpeg → **49 sec 完成**
+- 文件 1.41 MB → 3.46 MB (+1.7 GB 总量, 5.2 TB vePFS 内可忽略)
+- 验证: random seek 3.16ms → **0.85ms** (-73%)
+- 训练步速: 8.4 → **2.5 s/step** (-70%)
 
-仍快速下降, 未到 plateau (mix_vis600 同 step 早已下到 0.0173)。
+详见 commit `18e3942` `train_scripts/data/reencode_pure_vis600_mirrors.sh` + `build_task_a_pure_vis600.py` patch。
 
-### 5.5 设计意图 vs 当前观察 (与 mix_vis600 对比)
+### 5.4 完整 inline-eval 历史 (15 个数据点)
 
-| 维度 | mix_vis600 | pure_vis600 |
-|---|---|---|
-| 总训练 ep | 540 | 560 |
-| visrobot01 直接采集 | 310 (51.7%) | 309 (51.5%) |
-| 镜像增强 | 0 | 291 (48.5%) |
-| 跨域 (kai0_base/dagger) | 290 (48.3%) | 0 |
-| 同 val: step 8000 MAE@1 | 0.0189 | 0.0222 (-15%) |
-| 同 val: step 10000 MAE@1 | 0.0180 | 0.0211 (-15%) |
-| 同 val: step 12000 MAE@1 | 0.0173 | 0.0201 (-14%) |
+| step | MAE@1 | @10 | @25 | @50 | Δ | 阶段 |
+|---:|---:|---:|---:|---:|---:|---|
+| 2000 | 0.0268 | 0.0589 | 0.1074 | 0.1698 | (起点) | 慢速期 |
+| 4000 | 0.0254 | 0.0522 | 0.0911 | 0.1433 | -5.2% | |
+| 6000 | 0.0238 | 0.0466 | 0.0778 | 0.1191 | -6.3% | |
+| 8000 | 0.0222 | 0.0422 | 0.0684 | 0.1017 | -6.7% | |
+| 10000 | 0.0211 | 0.0391 | 0.0621 | 0.0904 | -5.0% | |
+| 12000 | 0.0201 | 0.0367 | 0.0577 | 0.0829 | -4.7% | |
+| **14000** | **0.0190** | 0.0346 | 0.0542 | 0.0773 | -5.5% | 慢速期终, codec 修复点 |
+| 16000 | 0.0182 | 0.0331 | 0.0516 | 0.0731 | -4.2% | resume 后, 加速期 |
+| 18000 | 0.0176 | 0.0319 | 0.0494 | 0.0696 | -3.3% | |
+| 20000 | 0.0171 | 0.0308 | 0.0475 | 0.0667 | -2.8% | |
+| 22000 | 0.0166 | 0.0299 | 0.0460 | 0.0643 | -2.9% | |
+| 24000 | 0.0163 | 0.0293 | 0.0448 | 0.0625 | -1.8% | |
+| 26000 | 0.0160 | 0.0287 | 0.0438 | 0.0610 | -1.8% | |
+| 28000 | 0.0157 | 0.0282 | 0.0430 | 0.0597 | -1.9% | |
+| **30000** | **0.0156** | 0.0278 | 0.0423 | 0.0587 | -0.6% | 减速, 接近 plateau |
+| 32-40k | (待出, 每 ~2.7 hr 一次) | — | — | — | — | |
 
-**初步观察**: mix_vis600 一致地比 pure_vis600 在自己 val 上低 14-15%, 提示 **kai0 跨域数据帮助比 hflip 镜像增强更多**。但 val 集不同 (mix val 含 kai0 样本易匹配, pure val 全 vis+mirror), 数值不绝对可比。
+仍在下降, 但减速 (-0.6% 比早期 -5%/2k 慢得多)。预测 step 40k 终点 ~0.0150-0.0152 (推测 plateau)。
+
+### 5.5 head-to-head 对比 (与 mix_vis600 同 step, 各自 val)
+
+| step | mix_vis600 (kai0 mix) | pure_vis600 (mirror aug) | gap (pure 落后) |
+|---:|---:|---:|---:|
+| 8000 | 0.0189 | 0.0222 | +17% |
+| 12000 | 0.0173 | 0.0201 | +16% |
+| 16000 | 0.0161 | 0.0182 | +13% |
+| 20000 | 0.0154 | 0.0171 | +11% |
+| 24000 | 0.0150 | 0.0163 | +9% |
+| 28000 | 0.0148 | 0.0157 | +6% |
+| 30000 | 0.0147 | 0.0156 | **+6%** |
+
+**重要观察**: pure_vis600 与 mix_vis600 gap **从 17% 缩到 6%** — 长训 + mirror augmentation 在自己 val 上能 partially close gap (虽 val 不同, 数值不绝对可比)。早期 (step <16k) kai0 跨域明显占优势; 后期 (step >24k) 差距快速缩小。可能原因:
+- kai0 数据帮助早期收敛 (更多样的视觉/动作 distribution)
+- mirror augmentation 是 implicit regularizer, 长训受益更多 (像 dropout/data aug 通常 long-horizon 起效)
 
 ---
 
-## 6. 系列结论 (2026-04-27 mix_vis600 完成后更新)
+## 6. vis_base_40k (gf0, 40k 长训) ⏳ **进行中, 59% 完成**
+
+### 6.1 实验设定
+
+与 mix_vis600 / pure_vis600 **完全一致超参** (4-way ablation 同步骤数对比):
+
+| 参数 | 值 |
+|---|---|
+| config | `pi05_flatten_fold_vis_base_40k` |
+| exp_name | `vis_base_40k_v1` |
+| init | `Task_A/mixed_1/params` (冷启) |
+| data | `Task_A_visrobot01_only/base` (288 train) + `/val` (22 val) |
+| 数据成分 | **vis_base 310 ep ONLY** (无 kai0, 无 mirror) — 4 个对照组中最纯净的单源 baseline |
+| steps / bs / fsdp | 40,000 / 128 / 8 |
+| peak_lr / warmup / decay | 1.5e-5 / 1000 / cosine to 1.5e-6 over 40k |
+| ema_decay | 0.9999 |
+| save_interval / keep_period | 2000 / 2000 |
+| inline_eval_every | 1 (每 2k step) |
+
+### 6.2 训练状态 (2026-04-28 10:32 CST 更新)
+
+| 项 | 值 |
+|---|---|
+| 启动 | Mon 04-27 13:25 CST (05:25 UTC) |
+| 当前 step | **23,700 / 40,000 (59.25%)** |
+| 已用时 | 21:04 hr |
+| 步速 | **~2.79 s/step** (gf1 共存, vePFS I/O 竞争 +20%) |
+| ckpts 已保存 | step 2k, 4k, ..., 22k (11 个) |
+| ETA 完成 | **Wed 04-29 01:20 CST** (剩 ~14.8 hr) |
+
+### 6.3 完整 inline-eval 历史 (11 个数据点)
+
+| step | MAE@1 | @10 | @25 | @50 | Δ |
+|---:|---:|---:|---:|---:|---:|
+| 2000 | 0.0270 | 0.0568 | 0.1031 | 0.1625 | (起点) |
+| 4000 | 0.0255 | 0.0507 | 0.0882 | 0.1391 | -5.6% |
+| 6000 | 0.0239 | 0.0459 | 0.0771 | 0.1197 | -6.3% |
+| 8000 | 0.0224 | 0.0425 | 0.0699 | 0.1064 | -6.3% |
+| 10000 | 0.0213 | 0.0403 | 0.0661 | 0.0994 | -4.9% |
+| 12000 | 0.0203 | 0.0389 | 0.0639 | 0.0958 | -4.7% |
+| 14000 | 0.0194 | 0.0379 | 0.0626 | 0.0939 | -4.4% |
+| 16000 | 0.0187 | 0.0373 | 0.0618 | 0.0927 | -3.6% |
+| 18000 | 0.0183 | 0.0370 | 0.0614 | 0.0920 | -2.1% |
+| 20000 | 0.0178 | 0.0367 | 0.0610 | 0.0916 | -2.7% |
+| **22000** | **0.0176** | 0.0365 | 0.0608 | 0.0913 | -1.1% |
+| 24-40k | (待出, 每 ~1.5 hr 一次) | — | — | — | — |
+
+明显减速 (step 22k 仅 -1.1%), 接近 plateau。预测 step 40k 终点 **0.0168-0.0172** 区间。
+
+### 6.4 head-to-head 对比 (3 个 40k 实验同 step)
+
+| step | mix_vis600 (vis+kai0) | pure_vis600 (vis+mirror) | vis_base_40k (vis only) |
+|---:|---:|---:|---:|
+| 2000 | (failed) | 0.0268 | **0.0270** |
+| 8000 | 0.0189 | 0.0222 | 0.0224 |
+| 12000 | 0.0173 | 0.0201 | 0.0203 |
+| 16000 | 0.0161 | 0.0182 | 0.0187 |
+| 20000 | 0.0154 | 0.0171 | 0.0178 |
+| 22000 | 0.0152 | 0.0166 | 0.0176 |
+
+⚠️ val 集都不同 (各 22/40/59 ep), 数值不绝对可比, 但同 init+同 schedule+同 step, 趋势可比。
+
+**重要观察**:
+- step 2000 三者**几乎相同** (0.0268-0.0270) — 起点一致, init 影响等同
+- step 8000 起 `mix < pure ≈ vis_base` — kai0 跨域**提速早期收敛**
+- step 16k+ `mix < pure < vis_base` — pure (mirror) 与 vis_base (only) gap 拉开, mirror 在长训中起效
+- vs vis_base, pure 长期改善 ~5-6%, mix 长期改善 ~14%
+
+### 6.5 关键意义
+
+vis_base_40k 是**单源 visrobot01 在 40k 步下的 plateau baseline**。配合 visrobot01_only_v1 (12k step, 0.0171, 同 288 train val 22) 形成"短训 vs 长训"对比:
+- 12k 步: 0.0171
+- 40k 步 (预测终点): 0.0168-0.0172
+- **改善 0-2%**
+
+提示**单源数据 12k 步即近 plateau, 加步数边际收益极低**。long horizon 优势主要来自**数据增强或多样性** (mix/mirror 都比 vis_only 长训改善多)。
+
+---
+
+## 7. 系列结论 (2026-04-28 更新, 4-way 同步骤数 ablation 趋势出来后)
 
 ### 已确认结论
 
@@ -365,14 +475,20 @@ train loss 持续单调降, param_norm 缓增 (训练健康)。
 3. **EMA 选择**: 短训 (≤15k) 用 0.999 收敛快; 长训 (40k) 用 0.9999 更稳。
 4. **norm_stats 续训策略**: 续训若数据分布变化小 (~5% 漂移), 保留旧 snapshot 比重算更稳, 避免输入分布跳变导致前期 MAE spike。
 5. **40k 长训 vs 13k 短训 (mix_vis600 0.0146 vs mixed_173 0.0129)**: 在自己各自的 val 上, 长训反而较差。但 val 集不同, 不严格可比。**真正结论必须看共同 test (sim01 真机/共同 hold-out)**。
-6. **kai0 跨域数据 vs hflip 镜像增强**: 同 step head-to-head, mix_vis600 一致比 pure_vis600 低 14-15% (虽 val 不同), 提示 kai0 旧域 (~290 ep) 比 291 mirror ep 提供更有效的 generalization 信号。
+6. **数据增强 hierarchy** (4-way @ step 22000 同步骤数):
+   - mix_vis600 (kai0 跨域): MAE@1 = 0.0152 (基线最低)
+   - pure_vis600 (hflip mirror): MAE@1 = 0.0166 (+9%)
+   - vis_base_40k (vis only): MAE@1 = 0.0176 (+16%)
+   - 趋势: **kai0 跨域 > hflip mirror > 单源**, gap 在长训中持续 (mirror 长训略缩小 gap)
+7. **build_task_a_pure_vis600.py codec 陷阱**: `libx264 preset=veryfast` 默认产生复杂 B-frame 引用链, random-seek 慢 3.3×, 训练慢 4×。修复用 `preset=ultrafast -bf 0 keyint=15` (decode-friendly) 速度恢复。**所有未来 mp4 build 脚本默认要用此参数**。
 
-### 部分验证 (pure_vis600 仍在跑)
+### 部分验证 (pure_vis600 + vis_base_40k 仍在跑)
 
-- ✅ **600 ep × 40k step (10 epoch) 在自己 val 上 plateau 0.0146** — 比 mixed_173 (519 ep × 13k = 5 epoch) 在其 val 上的 0.0129 要差 13%, 但 val 不可比
-- ✅ **kai0 mix > 镜像增强 (head-to-head 同 step trend)**: mix_vis600 一致比 pure_vis600 低 14-15% (各自 val), 倾向 kai0 跨域数据更有效
-- ⏳ **40k vs 13-15k 真实优劣**: 待 sim01 真机部署 mix_vis600 vs mixed_173 直接成功率比较
-- ⏳ **pure_vis600 完整 plateau 数据**: 需训练继续到 step 30k+ (按当前 8.4 s/step 还需 ~2 天)
+- ✅ **kai0 跨域 > mirror aug**: head-to-head 在每个 step 都成立 (从早期 17% gap 到 step 30k 的 6% gap)
+- ✅ **mirror aug > 单源**: pure_vis600 step 22k = 0.0166 vs vis_base_40k step 22k = 0.0176 (-6%)
+- ⏳ **pure_vis600 终点 plateau**: 现 step 30k = 0.0156, 减速明显, 预测 40k = 0.0150-0.0152
+- ⏳ **vis_base_40k 终点 plateau**: 现 step 22k = 0.0176, 减速明显, 预测 40k = 0.0168-0.0172
+- ⏳ **40k vs 13-15k 真实优劣**: 待 sim01 真机部署各 ckpt 直接成功率比较
 
 ---
 
