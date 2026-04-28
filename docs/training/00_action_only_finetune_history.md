@@ -1,7 +1,7 @@
-# Action-Only 微调实验历史汇总（pi05 / kai0）
+# 实验历史汇总（pi05 / kai0）
 
-> **作用**：集成本机所有 "freeze PaliGemma + 仅训 Action Expert" 类微调实验的历史记录与结果，**含每步 inline-eval MAE@{1,10,25,50} 完整曲线**。
-> **范围**：Task E（扶起倒箱）+ Task P（抓放盒子）+ 相关全参数对照实验。
+> **作用**：集成本机所有训练实验的历史记录与结果，**含每步 inline-eval MAE@{1,10,25,50} 完整曲线**。涵盖训练类型: action-only freeze、全参数解冻 (full-finetune)、LoRA (r=16/32)、AWBC、cold-start 混合数据训练 (mix_vis600 / pure_vis600 / mixed_visrobot01) 等。
+> **范围**：Task E（扶起倒箱）+ Task P（抓放盒子）+ Task A（FlattenFold） — 三个任务下的所有 train run, 每条 run 的 best step / best MAE / 数据规模 / freeze 策略 / LoRA r 都在此聚合; 详细超参 / 数据配方移到下方 "关联详细文档" 列表的对应专题文件。
 > **最近更新**：2026-04-28 10:32 CST (4-way ablation 进行中: pure_vis600 step 30k=0.0156, vis_base_40k step 22k=0.0176)
 > **数据来源**：`logs/train_*.log` 中 `[inline-eval] step=N MAE@1=… @10=… @25=… @50=…` 行（9 val ep × 20 frames，~30s/eval），与 `logs/eval_history_v2/v2_step_*.json` 离线归档（9 val ep × 50 queries）。
 > **命名前缀 `00_` 用于按文件名排序时置顶。**
