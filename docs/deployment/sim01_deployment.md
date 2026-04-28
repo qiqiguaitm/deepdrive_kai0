@@ -3,7 +3,7 @@
 > 机器: sim01 (Ubuntu 24.04, 2x RTX 5090 32GB)
 > 日期: 2026-03-28
 > 用途: kai0 Task A 推理部署 (工控机 + 推理机一体)
-> **关联文档**: 整体项目规划 (训练集群 + 部署 roadmap) 详见 [taskA_master_plan.md](taskA_master_plan.md)。
+> **关联文档**: 整体项目规划 (训练集群 + 部署 roadmap) 详见 [task_a_master_plan.md](task_a_master_plan.md)。
 
 ---
 

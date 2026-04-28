@@ -706,7 +706,7 @@ source ros2_ws/install/setup.bash
 
 - `docs/training/dynamic_dataset_workflow.md` — 动态数据集方案
 - `docs/training/task_p_unfreeze_8k_20k_analysis.md` — Task_P 过拟合分析
-- `docs/training/taskA_master_plan.md` — Task_A 训练路线
+- `docs/training/task_a_master_plan.md` — Task_A 训练路线
 - `docs/training/training_cli_notes.md` — 命令注记
 - `docs/deployment/sim01_deployment.md` — sim01 部署细节
 - kai0 官方论文 Model Arithmetic / Stage Advantage / Train-Deploy Alignment 三模块

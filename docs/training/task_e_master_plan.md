@@ -2,7 +2,7 @@
 
 > **作用**: Task E 全流程方案 —— 训练（本机 4×5090，差异化实验并行）+ 离线评测（inline + archive）+ 真机部署。
 > **硬件**: sim01 本地 4× RTX 5090 32GB（driver 580 / CUDA 13）；数据盘 `/data1` 可用 5.5 TB；62 GiB RAM。
-> **关联文档**: [taskA_master_plan.md](../deployment/taskA_master_plan.md), [sim01_deployment.md](../deployment/sim01_deployment.md)。
+> **关联文档**: [task_a_master_plan.md](../deployment/task_a_master_plan.md), [sim01_deployment.md](../deployment/sim01_deployment.md)。
 > **创建 / 最近更新**: 2026-04-19（v5：Phase 2 vision MLP LoRA 验证通过 @1=0.0260，展开 Pipeline B）
 
 ---

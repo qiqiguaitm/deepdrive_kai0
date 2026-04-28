@@ -171,7 +171,7 @@ python kai0/stage_advantage/annotation/discretize_advantage.py \
 仅当必要时执行，优先保持纯 advantage 训练的 AE。
 
 ### Phase 6 (简化): Merge（无 mirror）
-**决策**: 基于 `taskE_master_plan §2.3.1` 内部 A/B（mirror 中性/略负收益）+ D405 摄像头不对称风险 → **跳过 space_mirror**，回收 247 GB 数据。
+**决策**: 基于 `task_e_master_plan §2.3.1` 内部 A/B（mirror 中性/略负收益）+ D405 摄像头不对称风险 → **跳过 space_mirror**，回收 247 GB 数据。
 ```bash
 # 直接 merge: advantage (3055) + dagger_advantage (3457) = awbc_v2_full (6512 ep)
 python kai0/scripts/merge_lerobot.py \

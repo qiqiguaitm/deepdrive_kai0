@@ -7,7 +7,7 @@
 > **命名前缀 `00_` 用于按文件名排序时置顶。**
 >
 > **关联详细文档**：
-> - `taskE_master_plan.md` — Task E 完整规划与所有 Phase 1/2 实验细节
+> - `task_e_master_plan.md` — Task E 完整规划与所有 Phase 1/2 实验细节
 > - `task_p_unfreeze_8k_20k_analysis.md` — Task P 全参数解冻对照
 > - **`task_a_visrobot01_mixed_series_results.md`** — Task A 全参数微调系列 (mixed_gf0_173 / visrobot01_only / mix_vis600 / pure_vis600)
 > - `kai0_mixed_1_results.md` — Task A 迁移 init 来源

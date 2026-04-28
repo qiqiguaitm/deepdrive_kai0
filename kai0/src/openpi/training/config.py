@@ -1449,7 +1449,7 @@ _CONFIGS = [
     # Freeze PaliGemma backbone (img + LLM main tower), train only Action Expert (llm.*_1) and top-level
     # projections (action_in_proj, action_out_proj, time_mlp_*). Shrinks train_state from ~65 GB to ~22 GB.
     # Single GPU batch=4 on sim01 (multi-GPU NCCL has orphan-worker pinned-memory issue; investigate in v2).
-    # See docs/training/taskE_master_plan.md.
+    # See docs/training/task_e_master_plan.md.
     TrainConfig(
         name="pi05_stand_box_normal",
         model=pi0_config.Pi0Config(pi05=True),
