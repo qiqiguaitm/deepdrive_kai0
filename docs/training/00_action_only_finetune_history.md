@@ -2,7 +2,7 @@
 
 > **作用**：集成本机所有训练实验的历史记录与结果，**含每步 inline-eval MAE@{1,10,25,50} 完整曲线**。涵盖训练类型: action-only freeze、全参数解冻 (full-finetune)、LoRA (r=16/32)、AWBC、cold-start 混合数据训练 (mix_vis600 / pure_vis600 / mixed_visrobot01) 等。
 > **范围**：Task E（扶起倒箱）+ Task P（抓放盒子）+ Task A（FlattenFold） — 三个任务下的所有 train run, 每条 run 的 best step / best MAE / 数据规模 / freeze 策略 / LoRA r 都在此聚合; 详细超参 / 数据配方移到下方 "关联详细文档" 列表的对应专题文件。
-> **最近更新**：2026-04-30 11:40 CST (norm_stats 消融 inherit_norm 完成 final 0.0140, new_norm 进行中 step 22k=0.0131)
+> **最近更新**：2026-04-30 21:40 CST (norm_stats 消融全部完成: new_norm best 0.0127 vs inherit_norm best 0.0140, gap -9.3%)
 > **数据来源**：`logs/train_*.log` 中 `[inline-eval] step=N MAE@1=… @10=… @25=… @50=…` 行（9 val ep × 20 frames，~30s/eval），与 `logs/eval_history_v2/v2_step_*.json` 离线归档（9 val ep × 50 queries）。
 > **命名前缀 `00_` 用于按文件名排序时置顶。**
 >
@@ -50,7 +50,7 @@
 | Task A | **mixed_gf0_173** ⚡ | Task A | mix 173+173+173 ep | 13k | 9000 | **0.0129** | 0.0296 | 0.0521 | 0.0786 |
 | Task A | **mix_vis600_v1** ⚡ | Task A | mix 310+145+145 (540 train) | 40k | **38000** | **0.0146** | 0.0320 | 0.0554 | 0.0834 |
 | Task A | **pure_vis600_v1** ⚡ | Task A | 309 orig + 291 hflip mirror (560 train) | 40k | **39999** | **0.0151** | 0.0268 | 0.0404 | 0.0558 |
-| Task A | mix_apr28_450 (new_norm) ⏳ | Task A | 150 vis_apr28 + 150 kai0_base + 150 dagger | 30k 中 | 22000* | 0.0131* | 0.0290 | 0.0519 | 0.0799 |
+| Task A | **mix_apr28_450 (new_norm)** 🏆 | Task A | 150 vis_apr28 + 150 kai0_base + 150 dagger | 30k | **28000** | **0.0127** | 0.0289 | 0.0518 | 0.0796 |
 | Task A | mix_apr28_450 (inherit_norm) ⚡ | Task A | 同上 (norm_stats inherited from mixed_1) | 30k | **28000** | **0.0140** | 0.0300 | 0.0524 | 0.0799 |
 | Task A | **vis_base_40k_v1** ⚡ | Task A | vis_base 288+22 ONLY (no mix, no mirror) | 40k | **36000** | **0.0168** | 0.0365 | 0.0606 | 0.0907 |
 | Task A | visrobot01_only_v1 (B end) ⚡ | Task A | vis_base 288+22 (Phase A→B) | 12k | 11999 | 0.0171 | 0.0373 | 0.0625 | 0.0943 |
@@ -64,7 +64,7 @@
 ⏳ 训练中，详见 `task_a_visrobot01_mixed_600.md`。
 **4-way ablation 全部完成 (2026-04-29 01:21 CST 最后一个 vis_base_40k 落地)**: 数据 hierarchy 已确认 — kai0 跨域 (mix 0.0146) > hflip mirror (pure 0.0151) > 单源 (vis_only 0.0168), 三者 final gap 各 3.4% / 10.1% / 13.1%。详见 `task_a_visrobot01_mixed_600.md` Section 6.3 + Section 7。
 
-**norm_stats 消融 (mix_apr28_450 同 dataset 头对头)**: inherit_norm (复制 init 模型 norm) **一致差** new_norm (重算) **9-16%** 在每个 step。inherit_norm final 0.0140 vs new_norm step 22k 已 0.0131 (预测 final 0.0125-0.0128)。**冷启必须重算 norm_stats**。详见 `norm_stats_ablation_apr28_450.md`。
+**norm_stats 消融 (mix_apr28_450 同 dataset 头对头, ✅ 全部完成 2026-04-30)**: 两组 final plateau 后 — **new_norm 0.0127 vs inherit_norm 0.0140 (-9.3%)**。head-to-head gap 从早期 16% 缩到 final-plateau 9.3%, 不会完全闭合。@1/@10/@25/@50 horizon-dependent gap: 9.3%/3.7%/1.1%/0.4% (norm 主要影响**单步精度**, 对 chunk planning 影响小)。**冷启必须重算 norm_stats**。详见 `norm_stats_ablation_apr28_450.md`。
 
 **核心修正**（vs 上一版）：
 1. **真正的 Task E 最佳是 t10_allgood_25k = 0.0233**，不是 E2 的 0.0262。允许更长训练 + "allgood" 增广数据后，性能再下一台阶（-12%）。
@@ -520,7 +520,7 @@ step 36000 单点 best @ MAE@1=0.0168, **推荐部署**。**部署 tar 包**: `/
 > **完整 per-step 曲线**: `norm_stats_ablation_apr28_450.md`
 > 同 dataset (mix_apr28_450, 150 vis_apr28 + 150 kai0_base + 150 kai0_dagger), 同 hparams (30k, peak_lr=1.5e-5, ema=0.9999), 唯一差异 = norm_stats 来源。
 
-#### A 组 new_norm (gf1) — 进行中, step 22k 已 0.0131 (低于 B 组 final)
+#### A 组 new_norm (gf1) ✅ 已完成 (Thu 19:56 CST, 32:53 hr)
 norm_stats 从当前 405 train 重算 (default 行为)。
 
 | step | MAE@1 | @10 | @25 | @50 |
@@ -529,10 +529,12 @@ norm_stats 从当前 405 train 重算 (default 行为)。
 | 8000 | 0.0161 | 0.0344 | 0.0617 | 0.0957 |
 | 14000 | 0.0143 | 0.0301 | 0.0536 | 0.0826 |
 | 20000 | 0.0132 | 0.0290 | 0.0520 | 0.0801 |
-| **22000** | **0.0131** | 0.0290 | 0.0519 | 0.0799 |
-| 24-30k | (待出, ETA Thu 19:00-20:00 CST) | — | — | — |
+| 24000 | 0.0129 | 0.0289 | 0.0518 | 0.0797 |
+| 26000 | 0.0128 | 0.0289 | 0.0517 | 0.0796 |
+| **28000** | **0.0127** | 0.0289 | 0.0518 | 0.0796 ★ best |
+| 29999 | 0.0127 | 0.0290 | 0.0518 | 0.0796 (final, tied) |
 
-预测 step 30k = ~0.0125-0.0128 (仍快速下降)。
+step 26-29999 plateau @ 0.0127-0.0128。**部署 ckpt: step 28000**, deploy-ready folder + tar at `/vePFS/.../deepdive_kai0_tmp/data/mix_apr28_450_best_step28000{,.tar}` (含 README.md 描述本 ckpt + 顶层 norm_stats.json)。
 
 #### B 组 inherit_norm (gf0) ✅ 已完成 (Thu 11:29 CST, 23:55 hr)
 norm_stats 直接复制自 `Task_A/mixed_1/norm_stats.json` (init 模型 snapshot), 不重算。
@@ -549,7 +551,7 @@ norm_stats 直接复制自 `Task_A/mixed_1/norm_stats.json` (init 模型 snapsho
 
 step 26-29999 plateau @ 0.0140-0.0141。**部署 tar**: `/vePFS/.../deepdive_kai0_tmp/data/mix_apr28_450_inherit_norm_best.tar` (11.6 GB)。
 
-#### head-to-head gap 总览 (同 val, 数值直接可比)
+#### head-to-head gap 总览 (同 val, 数值直接可比, ✅ final 数据)
 
 | step | A new_norm | B inherit_norm | gap |
 |---:|---:|---:|---:|
@@ -557,9 +559,19 @@ step 26-29999 plateau @ 0.0140-0.0141。**部署 tar**: `/vePFS/.../deepdive_kai
 | 8000 | 0.0161 | 0.0181 | -11% |
 | 14000 | 0.0143 | 0.0158 | -9% |
 | 20000 | 0.0132 | 0.0147 | -10% |
-| 22000 | **0.0131** | 0.0144 | **-9%** (current) |
+| 24000 | 0.0129 | 0.0142 | -9% |
+| **28000** | **0.0127** | **0.0140** | **-9.3%** (final-plateau) |
 
-**核心结论**: **冷启 fine-tune 应重算 norm_stats** — inherit init 模型的 norm 会一致地差 9-16%, 即使长训也无法完全补偿。gap 在 short-horizon (@1) 更大, long-horizon (@50) 几乎消失 → norm 主要影响**单步 action 精度**, 对 chunk planning 影响小。
+#### Horizon-dependent gap (final step 28000)
+
+| horizon | A new_norm | B inherit_norm | gap |
+|---|---:|---:|---:|
+| @1 (单步) | 0.0127 | 0.0140 | **-9.3%** |
+| @10 | 0.0289 | 0.0300 | -3.7% |
+| @25 | 0.0518 | 0.0524 | -1.1% |
+| @50 | 0.0796 | 0.0799 | -0.4% |
+
+**核心结论**: **冷启 fine-tune 应重算 norm_stats** — inherit init 模型的 norm 会一致地差 9-16% MAE@1, 即使 30k 长训也无法完全补偿 (final 仍 -9.3%)。gap 在 short-horizon (@1) 大, long-horizon (@50) 几乎消失 → norm 主要影响**单步 action 精度**, 对 chunk planning 影响小。
 
 ---
 
@@ -586,11 +598,14 @@ step 26-29999 plateau @ 0.0140-0.0141。**部署 tar**: `/vePFS/.../deepdive_kai
 2. **pi05_base**（GCS 官方）→ 跨平台 / 任务差异大时使用
 3. 上一个最佳 ckpt（如 E2/14999）→ Phase 2 续训 / LoRA 起点
 
-#### 4.3.1 norm_stats 是否重算 (新归纳, 见 `norm_stats_ablation_apr28_450.md`)
-- **冷启 fine-tune (--overwrite OR weight_loader 而非 --resume): 必须重算 norm_stats**。继承 init 模型的 norm 会一致地差 **9-16%** MAE@1, 即使长训也无法完全补偿。
+#### 4.3.1 norm_stats 是否重算 (✅ 严格验证完成, 见 `norm_stats_ablation_apr28_450.md`)
+- **冷启 fine-tune (--overwrite OR weight_loader 而非 --resume): 必须重算 norm_stats**。继承 init 模型的 norm 会一致地差 **9-16% MAE@1 早期, 9.3% final**, 即使 30k 长训也无法完全补偿。
 - **续训 (--resume 同 exp_name)**: 应保留旧 norm_stats (已写在 ckpt assets/ 里), 维持模型一致性, 避免输入分布跳变 (见 visrobot01_only Phase B 的设计)。
 - 数据漂移越大 (新数据 vs init 训练数据), gap 越大。完全同分布数据 gap 接近 0。
-- gap 对 short-horizon (@1) 大, long-horizon (@50) 几乎消失 → 主要影响**单步精度**, 不破坏 chunk planning。
+- **horizon-dependent**: gap @1=9.3%, @10=3.7%, @25=1.1%, @50=0.4% — 主要影响**单步精度**, 不破坏 chunk planning。
+- 实验对照 (mix_apr28_450, 30k step, head-to-head 完美控制):
+  - new_norm best MAE@1 = **0.0127** (step 28000)
+  - inherit_norm best MAE@1 = **0.0140** (step 28000)
 
 ### 4.4 Save 策略
 
@@ -683,7 +698,7 @@ step 26-29999 plateau @ 0.0140-0.0141。**部署 tar**: `/vePFS/.../deepdive_kai
 | **mix_vis600_v1** ✅ | `/vePFS/.../checkpoints/pi05_flatten_fold_mix_vis600/mix_vis600_v1/` | **38000 (0.0146)** ★ 推荐部署; tar 包 `/vePFS/.../deepdive_kai0_tmp/data/mix_vis600_best_step38000.tar` 11.6 GB |
 | **pure_vis600_v1** ✅ | `/vePFS/.../checkpoints/pi05_flatten_fold_pure_vis600/pure_vis600_v1/` | **39999 (0.0151)** ★ 推荐部署; tar 包 `/vePFS/.../deepdive_kai0_tmp/data/pure_vis600_best_step39999.tar` 11.6 GB |
 | **vis_base_40k_v1** ✅ | `/vePFS/.../checkpoints/pi05_flatten_fold_vis_base_40k/vis_base_40k_v1/` | **36000 (0.0168)** ★ 推荐部署; tar 包 `/vePFS/.../deepdive_kai0_tmp/data/vis_base_40k_best_step36000.tar` 11.6 GB |
-| **mix_apr28_450 (new_norm)** ⏳ | `/vePFS/.../checkpoints/pi05_flatten_fold_mix_apr28_450/mix_apr28_450_v1/` | 进行中 step 22k=0.0131; tar 待自动打包 (ETA Thu 19-20:00 CST) → `/vePFS/.../deepdive_kai0_tmp/data/mix_apr28_450_new_norm_best.tar` |
+| **mix_apr28_450 (new_norm)** ✅🏆 | `/vePFS/.../checkpoints/pi05_flatten_fold_mix_apr28_450/mix_apr28_450_v1/` | **28000 (0.0127)** ★★★ Task A 最佳; deploy-ready folder + tar `/vePFS/.../deepdive_kai0_tmp/data/mix_apr28_450_best_step28000{,.tar}` 11.6 GB (含顶层 norm_stats.json + README.md, 按 mixed_1 init 部署格式) |
 | **mix_apr28_450 (inherit_norm)** ✅ | `/vePFS/.../checkpoints/pi05_flatten_fold_mix_apr28_450_inherit_norm/mix_apr28_450_inherit_norm_v1/` | **28000 (0.0140)** 消融对照; tar 包 `/vePFS/.../deepdive_kai0_tmp/data/mix_apr28_450_inherit_norm_best.tar` 11.6 GB |
 
 ### 5.6 其他相关（探索性 / 已废弃）
