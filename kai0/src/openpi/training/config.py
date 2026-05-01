@@ -1725,6 +1725,325 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
+    # Task_A visrobot01 ONLY, short 2k-step variant (gf0, ~200 eps dataset).
+    # Quick iteration. save_interval=500 → 4 eval points.
+    TrainConfig(
+        name="pi05_flatten_fold_visrobot01_only_2k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A_visrobot01_only/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=200, peak_lr=1.5e-5, decay_steps=2_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.999,
+        num_train_steps=2_000,
+        keep_period=500,
+        save_interval=500,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A_visrobot01_only/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A visrobot01 ONLY (no mixing with existing base/dagger).
+    # Data: 193 train + 17 val eps, all from visrobot01/KAI0/Task_A/<date>/base.
+    # Init from Task_A/mixed_1 (kai0 MA-merged), pure incremental fine-tune on new scene.
+    TrainConfig(
+        name="pi05_flatten_fold_visrobot01_only",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A_visrobot01_only/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.5e-5, decay_steps=12_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.999,
+        num_train_steps=12_000,
+        keep_period=1_000,
+        save_interval=1_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A_visrobot01_only/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A mixed (visrobot01 + existing base + existing dagger).
+    # Data: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A_mixed_gf1/base
+    # Built by train_scripts/data/build_task_a_mixed.py (equal N per source).
+    # Init from Task_A/mixed_1 (self-relevant kai0 pre-trained weights).
+    TrainConfig(
+        name="pi05_flatten_fold_mixed_visrobot01",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A_mixed_gf1/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.5e-5, decay_steps=12_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.999,
+        num_train_steps=12_000,
+        keep_period=1_000,
+        save_interval=1_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A_mixed_gf1/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A mixed (gf0 variant, 173 vis + 173 base + 173 dagger = 519 eps).
+    # Output of build_task_a_mixed.py --out-root Task_A_mixed_gf0 --val-size 30.
+    # 13k steps ≈ 15.5h end-to-end; peak_lr=1.5e-5 safe per gf1 experience.
+    TrainConfig(
+        name="pi05_flatten_fold_mixed_gf0",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A_mixed_gf0/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.5e-5, decay_steps=13_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.999,
+        num_train_steps=13_000,
+        keep_period=1_000,
+        save_interval=1_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A_mixed_gf0/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A mix_vis600 cold-start (40k steps, 540 train / 60 val).
+    # Composition: 310 vis_base (sim01 visrobot01) + 145 kai0_base + 145 kai0_dagger.
+    # Init from Task_A/mixed_1, peak_lr=1.5e-5 cosine to 1.5e-6 over 40k, ema=0.9999.
+    # save_interval=2000 (20 ckpts × 12 GB), inline-eval every 2k step (~20 evals × 19.5 min).
+    # ETA ~27h on gf0 8×A100, target finish Sun ~21:00 CST.
+    TrainConfig(
+        name="pi05_flatten_fold_mix_vis600",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/mix_vis600/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=40_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=40_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/mix_vis600/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A pure_vis600 cold-start (40k steps; pair with mix_vis600 for ablation).
+    # Composition: 309 vis_base ORIGINALS + 291 hflip MIRRORS (left↔right swap), zero kai0 source.
+    # 560 train (289 orig + 271 mir) / 40 val (20 orig + 20 mir, paired by source vis_base ep
+    # to avoid hflip leakage). Same hyperparams as pi05_flatten_fold_mix_vis600.
+    # Init from Task_A/mixed_1, peak_lr=1.5e-5 cosine to 1.5e-6 over 40k, ema=0.9999.
+    # save_interval=2000, inline-eval every 2k step.
+    TrainConfig(
+        name="pi05_flatten_fold_pure_vis600",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/pure_vis600/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=40_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=40_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/pure_vis600/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A vis_base_40k cold-start (vis_base 310 ep ONLY, no mirror, no kai0).
+    # Pair with mix_vis600 + pure_vis600 ablation: same hyperparams, source data
+    # is strict subset of pure_vis600 (no hflip mirrors).
+    # 288 train + 22 val (existing Task_A_visrobot01_only/{base,val} reused).
+    # Init from Task_A/mixed_1, peak_lr=1.5e-5 cosine to 1.5e-6 over 40k, ema=0.9999.
+    TrainConfig(
+        name="pi05_flatten_fold_vis_base_40k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A_visrobot01_only/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=40_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=40_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A_visrobot01_only/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A mix_apr28_450 cold-start (450 ep mix; 150 vis_2026-04-28 + 150 kai0_base + 150 kai0_dagger).
+    # 405 train + 45 val (15 per source stratified). Same hyperparams family as mix_vis600 but
+    # 30k steps targeting Apr 30 12:00 CST deadline.
+    # Init from Task_A/mixed_1, peak_lr=1.5e-5 cosine to 1.5e-6 over 30k, ema=0.9999.
+    TrainConfig(
+        name="pi05_flatten_fold_mix_apr28_450",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/mix_apr28_450/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=30_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=30_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/mix_apr28_450/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A mix_apr28_450 INHERIT_NORM variant (ablation vs new_norm).
+    # Same dataset (data/videos symlinked from mix_apr28_450), same hyperparams.
+    # ONLY difference: norm_stats.json copied from Task_A/mixed_1 (init model)
+    # instead of recomputed from current 405 train. Tests whether new norm matters.
+    TrainConfig(
+        name="pi05_flatten_fold_mix_apr28_450_inherit_norm",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/mix_apr28_450_inherit/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=30_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=30_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/mix_apr28_450_inherit/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A A_pure_1200 cold-start (1200 ep mix; 620 visrobot01 originals + 580 hflip mirrors).
+    # Source: ALL /vePFS/visrobot01/KAI0/Task_A/base/ (8 dates: 04-23..04-30).
+    # 1142 train + 58 val (paired by source ep, prevents hflip leakage).
+    # 50k steps, peak_lr=1.5e-5 cosine to 1.5e-6, ema=0.9999.
+    # Init from Task_A/mixed_1, fresh norm_stats from current 1142 train.
+    TrainConfig(
+        name="pi05_flatten_fold_a_pure_1200",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/A_pure_1200/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/A_pure_1200/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=2,
+    ),
+    # Task P Stage 3: 20k steps long run, cosine decay full horizon, peak_lr 1.5e-5
+    # between Stage 1 (1.25e-5) and Stage 2 (2.5e-5). Observe loss trajectory + overfit onset.
+    # save_interval=2000 → 10 eval points; ETA ~22h.
+    TrainConfig(
+        name="pi05_pick_place_box_kai0_unfreeze_20k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_P/base",
+            default_prompt="pick and place in box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.5e-5, decay_steps=20_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.999,
+        num_train_steps=20_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_P/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
     # Task P Stage 2: 8k steps + 2× LR + EMA 0.999 (mature EMA by step 2000).
     # Based on Stage 1 unfreeze_2k (MAE@1=0.0362 EMA); targets MAE@1 < 0.015.
     # ema=0.999 half-life=700 → EMA fully mature after step ~2000.
@@ -1781,36 +2100,6 @@ _CONFIGS = [
         batch_size=128,
         fsdp_devices=8,
         inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_P/val",
-        inline_eval_n_frames=200,
-        inline_eval_every=1,
-    ),
-    # Task_A mixed (visrobot01 + existing base + existing dagger).
-    # Used by dynamic dataset workflow (train_scripts/launch/dynamic_dataset_train.sh).
-    # Data built by train_scripts/data/build_task_a_mixed.py (equal N per source).
-    # With --val-size 21 → stratified 7-ep val per source.
-    # Init from the clean cached pi05_base checkpoint on this host.
-    TrainConfig(
-        name="pi05_flatten_fold_mixed_visrobot01",
-        model=pi0_config.Pi0Config(pi05=True),
-        data=LerobotAgilexDataConfig(
-            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A_mixed_gf1/base",
-            default_prompt="Flatten and fold the cloth.",
-            use_delta_joint_actions=False,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            f"{_KAI0_DATA_ROOT}/.cache/openpi/openpi-assets/checkpoints/pi05_base/params"
-        ),
-        lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=1.5e-5, decay_steps=12_000, decay_lr=1.5e-6
-        ),
-        ema_decay=0.999,
-        num_train_steps=12_000,
-        keep_period=1_000,
-        save_interval=1_000,
-        num_workers=8,
-        batch_size=128,
-        fsdp_devices=8,
-        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A_mixed_gf1/val",
         inline_eval_n_frames=200,
         inline_eval_every=1,
     ),
@@ -2560,96 +2849,6 @@ _CONFIGS = [
         eval_early_count=3,
         eval_batches=4,
     ),
-    #**************************FlattenFold AWBC from official MA checkpoint (β-official)*******************************
-    # Warm-start AWBC fine-tune from the official MA product (Task_A/mixed_1, HF release).
-    # Task_A mix_vis600 cold-start (40k steps, 540 train / 60 val).
-    # Composition: 310 vis_base (sim01 visrobot01) + 145 kai0_base + 145 kai0_dagger.
-    # Init from Task_A/mixed_1, peak_lr=1.5e-5 cosine to 1.5e-6 over 40k, ema=0.9999.
-    # save_interval=2000 (20 ckpts × 12 GB), inline-eval every 2k step (~20 evals × 19.5 min).
-    # 部署: norm_stats 在 data 路径 (mix_vis600/base/norm_stats.json), asset_id 默认回退 = repo_id (绝对) → 直读.
-    TrainConfig(
-        name="pi05_flatten_fold_mix_vis600",
-        model=pi0_config.Pi0Config(pi05=True),
-        data=LerobotAgilexDataConfig(
-            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/mix_vis600/base",
-            default_prompt="Flatten and fold the cloth.",
-            use_delta_joint_actions=False,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
-        ),
-        lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=40_000, decay_lr=1.5e-6
-        ),
-        ema_decay=0.9999,
-        num_train_steps=40_000,
-        keep_period=2_000,
-        save_interval=2_000,
-        num_workers=8,
-        batch_size=128,
-        fsdp_devices=8,
-        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/mix_vis600/val",
-        inline_eval_n_frames=200,
-        inline_eval_every=1,
-    ),
-    # Task_A pure_vis600 cold-start (40k steps; pair with mix_vis600 for ablation).
-    # Composition: 309 vis_base ORIGINALS + 291 hflip MIRRORS (left↔right swap), zero kai0 source.
-    # Same hyperparams as pi05_flatten_fold_mix_vis600. Init from Task_A/mixed_1.
-    TrainConfig(
-        name="pi05_flatten_fold_pure_vis600",
-        model=pi0_config.Pi0Config(pi05=True),
-        data=LerobotAgilexDataConfig(
-            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/pure_vis600/base",
-            default_prompt="Flatten and fold the cloth.",
-            use_delta_joint_actions=False,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
-        ),
-        lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=40_000, decay_lr=1.5e-6
-        ),
-        ema_decay=0.9999,
-        num_train_steps=40_000,
-        keep_period=2_000,
-        save_interval=2_000,
-        num_workers=8,
-        batch_size=128,
-        fsdp_devices=8,
-        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/pure_vis600/val",
-        inline_eval_n_frames=200,
-        inline_eval_every=1,
-    ),
-    # Task_A vis_base_40k cold-start (vis_base 310 ep ONLY, no mirror, no kai0).
-    # Pair with mix_vis600 + pure_vis600 ablation: same hyperparams, source data
-    # is strict subset of pure_vis600 (no hflip mirrors).
-    # 288 train + 22 val (existing Task_A_visrobot01_only/{base,val} reused).
-    # Init from Task_A/mixed_1, peak_lr=1.5e-5 cosine to 1.5e-6 over 40k, ema=0.9999.
-    TrainConfig(
-        name="pi05_flatten_fold_vis_base_40k",
-        model=pi0_config.Pi0Config(pi05=True),
-        data=LerobotAgilexDataConfig(
-            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A_visrobot01_only/base",
-            default_prompt="Flatten and fold the cloth.",
-            use_delta_joint_actions=False,
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader(
-            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
-        ),
-        lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=40_000, decay_lr=1.5e-6
-        ),
-        ema_decay=0.9999,
-        num_train_steps=40_000,
-        keep_period=2_000,
-        save_interval=2_000,
-        num_workers=8,
-        batch_size=128,
-        fsdp_devices=8,
-        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A_visrobot01_only/val",
-        inline_eval_n_frames=200,
-        inline_eval_every=1,
-    ),
     # Goal: approximate the paper's MA+SA combination — "MA first, then SA on top of MA".
     # Data: Task_A/advantage (3055 ep base with advantage labels), following official AWBC recipe
     # (dagger has no official advantage, so AWBC stays on base only).
@@ -2686,6 +2885,48 @@ _CONFIGS = [
             peak_lr=1.0e-5,
             decay_steps=20_000,
             decay_lr=1.0e-6,
+        ),
+    ),
+    #**************************FlattenFold AWBC continued: β-official + base+dagger advantage*******************************
+    # Stage 3 on top of β-official: extend SA (AWBC) conditioning to dagger-like states.
+    # β-official (mixed_1 → base-advantage AWBC @ 20k) fills Val A well (j50=0.019) but
+    # collapses on Val B (j50=0.50) — SA prompt conditioning only learned on base states.
+    # This run continues fine-tune on Task_A/awbc_v2_full (base+dagger) to build the
+    # "positive prompt → reasonable action" mapping in dagger states too.
+    # Risk: v2_vanilla-style "AWBC + dagger multi-modal" regression. Mitigated by:
+    #   - Very low peak_lr (5e-6, half of β-official, 1/5 of v2_vanilla)
+    #   - Short warmup (500), start from an already-converged ckpt
+    #   - Inherit mixed_1 norm_stats (same as β-official) — no state distribution shift
+    TrainConfig(
+        name="pi05_flatten_fold_awbc_from_beta_official_v2data",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/awbc_v2_full",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+            assets=AssetsConfig(
+                assets_dir=f"{_KAI0_DATA_ROOT}/checkpoints/Task_A",
+                asset_id="mixed_1",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/pi05_flatten_fold_awbc_from_official_mixed/beta_official_v1/19999/params"
+        ),
+        num_train_steps=30_000,
+        keep_period=5000,
+        num_workers=16,
+        batch_size=256,
+        val_ratio=0.1,
+        eval_interval_early=100,
+        eval_interval_late=1000,
+        eval_early_count=3,
+        eval_batches=4,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500,
+            peak_lr=5.0e-6,
+            decay_steps=30_000,
+            decay_lr=5.0e-7,
         ),
     ),
     #**************************FlattenFold DCT-only (v4: conservative, DCT frequency regularization)*******************************
