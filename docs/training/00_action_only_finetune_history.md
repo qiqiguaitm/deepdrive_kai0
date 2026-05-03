@@ -2,7 +2,7 @@
 
 > **作用**：集成本机所有训练实验的历史记录与结果，**含每步 inline-eval MAE@{1,10,25,50} 完整曲线**。涵盖训练类型: action-only freeze、全参数解冻 (full-finetune)、LoRA (r=16/32)、AWBC、cold-start 混合数据训练 (mix_vis600 / pure_vis600 / mixed_visrobot01) 等。
 > **范围**：Task E（扶起倒箱）+ Task P（抓放盒子）+ Task A（FlattenFold） — 三个任务下的所有 train run, 每条 run 的 best step / best MAE / 数据规模 / freeze 策略 / LoRA r 都在此聚合; 详细超参 / 数据配方移到下方 "关联详细文档" 列表的对应专题文件。
-> **最近更新**：2026-04-30 21:40 CST (norm_stats 消融全部完成: new_norm best 0.0127 vs inherit_norm best 0.0140, gap -9.3%)
+> **最近更新**：2026-05-03 23:00 CST (pure_1200 系列收录: task_a_pure_1200_new_norm 完成 0.0145, task_a_new_pure_1200_new_norm 训练中 best 0.0105 @ step 32k, -31.8%)
 > **数据来源**：`logs/train_*.log` 中 `[inline-eval] step=N MAE@1=… @10=… @25=… @50=…` 行（9 val ep × 20 frames，~30s/eval），与 `logs/eval_history_v2/v2_step_*.json` 离线归档（9 val ep × 50 queries）。
 > **命名前缀 `00_` 用于按文件名排序时置顶。**
 >
@@ -11,6 +11,7 @@
 > - `task_p_unfreeze_8k_20k_analysis.md` — Task P 全参数解冻对照
 > - **`task_a_visrobot01_mixed_600.md`** — Task A 全参数微调系列 (mixed_gf0_173 / visrobot01_only / mix_vis600 / pure_vis600)
 > - **`norm_stats_ablation_apr28_450.md`** — norm_stats 消融实验 (new_norm vs inherit_norm, head-to-head 同 dataset 同 hparams)
+> - **`task_a_pure_1200_new_norm_results.md`** — pure_1200 系列两个实验 (-new 限定 vs 全日期, mixed_1 init + 50k)
 > - `kai0_mixed_1_results.md` — Task A 迁移 init 来源
 > - `training_plans.md` — kai0_mixed_1 / kai0_full 训练 recipe
 > - `project_complete_guide.md` — freeze_filter / inline eval 总览
@@ -56,6 +57,8 @@
 | Task A | visrobot01_only_v1 (B end) ⚡ | Task A | vis_base 288+22 (Phase A→B) | 12k | 11999 | 0.0171 | 0.0373 | 0.0625 | 0.0943 |
 | Task A | visrobot01_only_v1 (Phase A end) ⚡ | Task A | visrobot01-only 193+17 | 9k | 9000 | 0.0179 | 0.0389 | 0.0648 | 0.0974 |
 | Task A | visrobot01_only_2k_gf0 ⚡ | Task A | visrobot01-only 193+17 | 2k | 1999 | 0.0202 | 0.0411 | 0.0680 | 0.1017 |
+| Task A | **task_a_new_pure_1200_new_norm** 🔥⏳ | Task A | A_new_pure_1200 (1143 train, 仅 6 个 -new 日期, mixed_1 init) | 50k | 32000* | **0.0105*** | 0.0231 | 0.0386 | 0.0582 |
+| Task A | **task_a_pure_1200_new_norm** ⚡ | Task A | A_pure_1200 (1142 train, 全 8 日期 + -new, mixed_1 init) | 50k | 49999 | **0.0145** | 0.0255 | 0.0384 | 0.0539 |
 
 ¹ E3 (combo) 在 step ~8k 因 GPU 1 NUMA SIGSEGV 中断，best 在 step 12000 之前；step 10000=0.0284, step 12000=0.0277。
 ² v2 训练超过 nominal 15k 步，step 16000 实测最佳 (0.0382)；master plan 中 0.0411@14000 是 canonical 数。
@@ -65,6 +68,8 @@
 **4-way ablation 全部完成 (2026-04-29 01:21 CST 最后一个 vis_base_40k 落地)**: 数据 hierarchy 已确认 — kai0 跨域 (mix 0.0146) > hflip mirror (pure 0.0151) > 单源 (vis_only 0.0168), 三者 final gap 各 3.4% / 10.1% / 13.1%。详见 `task_a_visrobot01_mixed_600.md` Section 6.3 + Section 7。
 
 **norm_stats 消融 (mix_apr28_450 同 dataset 头对头, ✅ 全部完成 2026-04-30)**: 两组 final plateau 后 — **new_norm 0.0127 vs inherit_norm 0.0140 (-9.3%)**。head-to-head gap 从早期 16% 缩到 final-plateau 9.3%, 不会完全闭合。@1/@10/@25/@50 horizon-dependent gap: 9.3%/3.7%/1.1%/0.4% (norm 主要影响**单步精度**, 对 chunk planning 影响小)。**冷启必须重算 norm_stats**。详见 `norm_stats_ablation_apr28_450.md`。
+
+**pure_1200 系列 (mixed_1 init + new_norm + 50k, 2026-05-03)**: 头对头数据源对比 — **`-new` 限定 6 日期 (1143 train) 大幅领先全 8 日期 (1142 train)** — same hparams 下 new_pure_1200 在 step 32k 达 **MAE@1=0.0105**, 比 pure_1200 同步数 0.0154 低 **31.8%**。`-new` 日期是最新高质量采集, 早期日期数据可能含更多采集噪声。完整曲线见 `task_a_pure_1200_new_norm_results.md`。
 
 **核心修正**（vs 上一版）：
 1. **真正的 Task E 最佳是 t10_allgood_25k = 0.0233**，不是 E2 的 0.0262。允许更长训练 + "allgood" 增广数据后，性能再下一台阶（-12%）。
