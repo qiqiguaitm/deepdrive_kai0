@@ -39,7 +39,72 @@
 | gf2 | `/home/tim/workspace/deepdive_kai0/` → `/data/shared/tim/workspace/deepdive_kai0/` | 本机 4TB ext4 |
 | gf3 | 同 gf2 (各自独立, 不共享) | 同 gf2 |
 
-### 2.2 数据集 / Checkpoint 目录约定
+### 2.2 Checkpoint 本地存储规范 ⭐ (2026-05-04 重要更新)
+
+> **核心原则**: 每台服务器的 ckpt 写到独立的本地路径, 不跨机同步, 重启不丢失。
+
+**统一路径**: 每台机器都使用 `/home/tim/local_ckpts/` 作为 ckpt 根目录 (其中是 symlink 还是 real dir 因机器而异)。
+
+| Server | `/home/tim/local_ckpts/` 实现 | 物理后端 | 容量 | 持久性 |
+|---|---|---|---|---|
+| gf0 | symlink → `/vePFS/tim/gf0_local_ckpts/` | /vePFS (50T 共享 FS) | 看 /vePFS 余量 | ✓ 持久 |
+| gf1 | symlink → `/vePFS/tim/gf1_local_ckpts/` | /vePFS | 看 /vePFS 余量 | ✓ 持久 |
+| gf2 | 真实 dir | /dev/vda2 (492G ext4) | ~290G 可用 | ✓ 持久 |
+| gf3 | 真实 dir | /dev/vda2 (492G ext4) | ~410G 可用 | ✓ 持久 |
+
+**为何不放 `/dev/shm` (RAM)**:
+- 重启数据丢失, 训练 ckpt 不能容忍
+- /dev/shm 适合 dataset (可从源重建), 不适合 ckpt (训练成果)
+
+**为何 gf0/gf1 没用 `/home/tim` 真实 dir**:
+- gf0/gf1 上 `/home/tim` 在 overlay (~99G, 已 95% 用) — 没空间存 ckpt
+- 唯一持久 + 大容量选项是 `/vePFS` (slow but persistent)
+- 所以统一用 `/home/tim/local_ckpts` (symlink) → /vePFS 子目录, **每机独立子目录** 避免冲突
+
+**怎么让训练写到 local_ckpts**:
+
+openpi 默认把 ckpt 写到 `<KAI0_DATA_ROOT>/checkpoints/<config>/<exp>/`。我们用 **per-exp 软连接**, 在 launcher 启动训练前 pre-create 链接:
+
+```bash
+# 在 launcher 里:
+CONFIG=pi05_flatten_fold_<your_config>
+EXP=<your_exp_name>
+LOCAL_DIR=/home/tim/local_ckpts/$CONFIG/$EXP
+WORKSPACE_DIR=$KAI0_DATA_ROOT/checkpoints/$CONFIG/$EXP
+
+mkdir -p "$LOCAL_DIR"
+mkdir -p "$(dirname "$WORKSPACE_DIR")"
+[ -e "$WORKSPACE_DIR" ] && [ ! -L "$WORKSPACE_DIR" ] && {
+    echo "WARN: $WORKSPACE_DIR exists as real dir, please move first"
+    exit 1
+}
+ln -sfn "$LOCAL_DIR" "$WORKSPACE_DIR"
+
+# 然后正常启训练:
+.venv/bin/python scripts/train.py $CONFIG --exp_name=$EXP --resume
+```
+
+`ln -sfn` (`-n` = no-deref existing symlink) 确保 idempotent, 重复 launcher 启动不出错。
+
+**lsyncd 兼容性 (gf2/gf3)**:
+- gf2/gf3 之间有 lsyncd 双向 mirror `/data/shared/` 目录
+- `/home/tim/local_ckpts` 在 `/dev/vda2` 不在 lsyncd scope, 不会被同步 ✓
+- 而 `/home/tim/workspace` 是 symlink → `/data/shared/...` 在 lsyncd 范围, 千万 **不要直接写 ckpt 到** `<kai0>/checkpoints/<config>/<exp>` 真实目录 (旧 bug 多次因此损坏)
+
+**keep_period 设置**:
+- 100k step 训练: `keep_period=10000` (保留 10 个) 比 `2_000` (保留 50 个) 减少 5× 占用
+- 50k step: `keep_period=10000` (保留 5 个) 大约 165GB; 默认 `2_000` 时 825GB 可能撑爆 /dev/vda2
+
+**已知 ckpt 路径**:
+
+| 实验 | 当前 ckpt 真实路径 | 所有者 |
+|---|---|---|
+| gf2 实验1 | `/home/tim/local_ckpts/pi05_flatten_fold_mix_b6000_p1200_init_mixed_1/task_a_mix_base6000_pure1200_new_norm_base_mixed_1` | gf2 |
+| gf3 实验2 | `/home/tim/local_ckpts/pi05_flatten_fold_mix_b6000_p1200_init_pi05_base/task_a_mix_base6000_pure1200_new_norm_base_pi0.5` | gf3 |
+| gf0 实验3 | `/vePFS/tim/gf0_local_ckpts/pi05_flatten_fold_mix_b6000_p1200_init_pi05_base_100k/task_a_mix_base6000_pure1200_new_norm_base_pi0.5_100000` | gf0 |
+| gf1 #25 (历史) | `/vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_flatten_fold_a_new_pure_1200/task_a_new_pure_1200_new_norm` | gf1 (训练完成后可移到 local_ckpts) |
+
+### 2.3 数据集 / Checkpoint 目录约定 (传统 view)
 
 ```
 deepdive_kai0/
