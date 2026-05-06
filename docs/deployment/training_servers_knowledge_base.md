@@ -1,4 +1,18 @@
-# 训练服务器知识库 (gf0 / gf1 / gf2 / gf3)
+# 训练服务器知识库 (gf0 / ~~gf1~~ / gf2 / gf3)
+
+> ⚠️ **2026-05-06 更新: gf1 已退役**
+>
+> **当前 active 服务器: gf0, gf2, gf3** (3 台)。gf1 跳板 `14.103.44.161:11111` SSH 不通, 服务器已下线。
+>
+> 历史影响:
+> - **gf1 #25** (`task_a_new_pure_1200_new_norm` 50k 训练) 在 step 40000 因 ENOSPC crash; best ckpt @ step 38000 (MAE@1=0.0104) 已通过 TOS 拉到 sim01 `/data1/DATA_IMP/checkpoints/task_a_new_pure_1200_new_norm_best_step38000/`
+> - **gf1 上 /vePFS 仍存在** (gf0 共享访问), 历史 ckpt + dataset 仍可从 gf0 操作
+> - **本地 .bashrc 已删 gf1 alias** (`alias gf1=...` 已注释)
+> - 后续遇到 "需要 gf1" 的脚本 / 文档 → 切换到 gf0 (走 /vePFS 共享, 同访问权限)
+>
+> 下面表格中保留 gf1 列以保留历史信息, 但请视作 **"已下线 / 不可用"**。
+
+
 
 > **作用**: 4 台 GPU 训练服务器的全方位参考 — 硬件、文件结构、环境、连接方式、训练命令、机器间差异、常见运维。
 > **更新日期**: 2026-05-02
@@ -48,7 +62,7 @@
 | Server | `/home/tim/local_ckpts/` 实现 | 物理后端 | 容量 | 持久性 |
 |---|---|---|---|---|
 | gf0 | symlink → `/vePFS/tim/gf0_local_ckpts/` | /vePFS (50T 共享 FS) | 看 /vePFS 余量 | ✓ 持久 |
-| gf1 | symlink → `/vePFS/tim/gf1_local_ckpts/` | /vePFS | 看 /vePFS 余量 | ✓ 持久 |
+| ~~gf1~~ (已退役) | symlink → `/vePFS/tim/gf1_local_ckpts/` | /vePFS | 已下线 | — |
 | gf2 | 真实 dir | /dev/vda2 (492G ext4) | ~290G 可用 | ✓ 持久 |
 | gf3 | 真实 dir | /dev/vda2 (492G ext4) | ~410G 可用 | ✓ 持久 |
 
