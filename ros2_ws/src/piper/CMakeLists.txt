@@ -8,6 +8,7 @@ install(PROGRAMS
   scripts/arm_teleop_node.py
   scripts/master_handle_node.py
   scripts/policy_inference_node.py
+  scripts/replay_node.py
   scripts/rerun_viz_node.py
   scripts/multi_camera_node.py
   DESTINATION lib/${PROJECT_NAME}

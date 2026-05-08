@@ -62,4 +62,73 @@ export const api = {
       `/api/episodes/${task}/${subset}/${ep}/depth/${cam}/info`),
 
   joints: () => req<JointState>(`/api/joints`),
+
+  // ── Replay (P3) ──
+  replayPreflight: (task: string, subset: string, date: string, ep: number) =>
+    req<ReplayPreflight>(`/api/replay/preflight`, {
+      method: "POST",
+      body: JSON.stringify({ task, subset, date, episode_id: ep }),
+    }),
+  replayExecute: (task: string, subset: string, date: string, ep: number, rate = 1.0) =>
+    req<ReplayExecute>(`/api/replay/execute`, {
+      method: "POST",
+      body: JSON.stringify({ task, subset, date, episode_id: ep, rate, loop: false }),
+    }),
+  replayProgress: () => req<ReplayProgress>(`/api/replay/progress`),
+  replayStop: () => req<ReplayStop>(`/api/replay/stop`, { method: "POST" }),
 };
+
+export interface ReplayPreflight {
+  ok: boolean;
+  parquet_path: string;
+  frames: number;
+  fps: number;
+  duration_s: number;
+  action0?: number[];
+  current_state?: number[] | null;
+  max_diff_deg: number;
+  per_joint_diff_deg: number[];
+  aligned: boolean;
+  deployment_mode: string;
+  policy_inference_alive: boolean;
+  target_node?: string | null;   // '/replay' or '/policy_inference', null if neither alive
+  publisher_conflict: string[];
+  auto_home_will_trigger: boolean;
+  home_n_planned: number;
+  publish_rate: number;
+  expected_buffer_total: number;
+  step?: string;
+  reason?: string;
+}
+
+export interface ReplayExecute {
+  ok: boolean;
+  started?: boolean;
+  step?: string;
+  reason?: string;
+  trace?: { step: string; ok: boolean; msg: string }[];
+}
+
+export interface ReplayProgress {
+  ok: boolean;
+  reason?: string;
+  idx?: number;
+  total?: number;
+  done?: boolean;
+  fraction?: number;
+  age_s?: number;
+}
+
+export interface ReplayStop {
+  ok: boolean;
+  stopped?: boolean;
+  trace?: { step: string; ok: boolean; msg: string }[];
+}
+
+// Compound task_id `Task_A_2026-04-16` → `{task: 'Task_A', date: '2026-04-16'}`.
+// Returns null if compound has no YYYY-MM-DD suffix (e.g. our kai0_official_base
+// test data, which is replay-only via CLI not via UI episode browser).
+export function splitCompoundTaskId(compound: string): { task: string; date: string } | null {
+  const m = compound.match(/^(.+)_(\d{4}-\d{2}-\d{2})$/);
+  return m ? { task: m[1], date: m[2] } : null;
+}

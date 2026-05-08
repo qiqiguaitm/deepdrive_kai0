@@ -39,10 +39,12 @@ class Remote:
     host: str
     port: int
     dest_root: str
-    # transport: "rsync" (default, direct ssh+rsync) 或 "tos_via_gf1"
-    # (tar → TOS bucket → ssh gf1 extract /transfer-shanghai fuse → /vePFS gpfs).
-    # TOS 路径对 gf0 类慢 SSH 链路是关键 -- 直推 2-3 MB/s 跟不上录制速率,
-    # TOS intra-region 85 MB/s 有 25× 余量.
+    # transport options:
+    #  - "rsync"        : 直推 ssh+rsync 到 dest_root (老链路, 小文件 OK 但 gf0 WAN 慢)
+    #  - "tos_via_gf1"  : tar → TOS → ssh gf1 extract → /vePFS (legacy, 写 vePFS)
+    #  - "tos_only"     : 直接 per-file upload 到 TOS, 不 tar 不 extract; gf 端通过
+    #                     fuse mount /transfer-shanghai/KAI0 直接读, 不写 vePFS.
+    #                     这是 2026-05+ 推荐路径 (gf2 cron pull TOS, gf0/1 fuse, vePFS 只留 ckpt).
     transport: str = "rsync"
 
 
@@ -53,10 +55,11 @@ class Remote:
 # bja2-vla:  单独的开发机, root SSH, rsync 3.1.3 (不支持 --mkpath, 见 _rsync_cmd 里用
 #   --rsync-path 兼容老版本).
 DEFAULT_REMOTES: list[Remote] = [
-    # gf0 走 TOS 中转 (sim01→TOS 85 MB/s, gf1 fuse extract 到共享 gpfs).
-    # "gf1" 的 ssh 指的是用来触发远端 extract; 数据本身不经 ssh 隧道。
-    Remote(name="gf0-vepfs", user="tim", host="14.103.44.161", port=11111,
-           dest_root="/vePFS/visrobot01/KAI0", transport="tos_via_gf1"),
+    # 2026-05+: 直 upload 到 TOS bucket. gf0/gf1 通过 /transfer-shanghai/KAI0 fuse
+    # mount 直读, 不再写 vePFS. gf2 cron */5 拉 TOS, gf3 lsyncd 镜像 gf2.
+    # dest_root 在 tos_only transport 下用作 TOS prefix 标记 (= "KAI0/").
+    Remote(name="gf0-tos", user="tim", host="14.103.44.161", port=11111,
+           dest_root="KAI0", transport="tos_only"),
     # bja2 直推 rsync 速率 (~13 MB/s) 足以跟上录制, 不需要走 TOS.
     Remote(name="bja2-vla", user="root", host="115.190.97.39", port=37686,
            dest_root="/VLA-Data/scripts/lianqing/data/bipiper_dataset",
@@ -311,6 +314,73 @@ def _worker(job: _Job) -> None:
         t.join()
 
 
+# ─── TOS circuit breaker — 连续失败时自动降级到 rsync, 同时通知用户 ───
+# 触发: 同一 remote 上 _push_episode_via_tos 连续 N 次失败 (默认 3)
+# 行为: 标记电路开路, 之后该 remote 的 ep 推送改走 rsync (不走 TOS)
+#      经过 RETRY_AFTER 秒后下一次推送会再尝试 TOS, 成功则关闭电路
+# 通知: log ERROR + 写 marker file + notify-send (有桌面会话则桌面气泡)
+TOS_FAILURE_THRESHOLD: int = int(os.environ.get("KAI0_TOS_FAILURE_THRESHOLD", "3"))
+TOS_CIRCUIT_RETRY_AFTER_S: int = int(os.environ.get("KAI0_TOS_CIRCUIT_RETRY_AFTER_S", "600"))  # 10 min
+_TOS_FAILURE_STREAK: dict[str, int] = {}
+_TOS_CIRCUIT_OPEN_AT: dict[str, float] = {}
+_TOS_CIRCUIT_LOCK = threading.Lock()
+_TOS_CIRCUIT_MARKER = Path("/tmp/kai0_tos_circuit.txt")
+
+
+def _tos_circuit_is_open(remote_name: str) -> bool:
+    """查电路是否处于打开 (= 走 rsync 旁路) 状态; 超过 RETRY_AFTER 自动允许重试."""
+    with _TOS_CIRCUIT_LOCK:
+        opened_at = _TOS_CIRCUIT_OPEN_AT.get(remote_name, 0.0)
+        if opened_at == 0.0:
+            return False
+        if time.time() - opened_at > TOS_CIRCUIT_RETRY_AFTER_S:
+            return False  # 允许探测一次, 但不立刻清状态; 探测成功后才清
+        return True
+
+
+def _notify_user(title: str, msg: str) -> None:
+    """尽量多通道通知: marker file + notify-send + log ERROR (sync_log 调用方做)."""
+    try:
+        _TOS_CIRCUIT_MARKER.write_text(f"{datetime.now().isoformat()} {title}: {msg}\n")
+    except OSError:
+        pass
+    try:
+        # notify-send 仅在有桌面 DBUS session 时有效, 失败静默
+        subprocess.run(
+            ["notify-send", "-u", "critical", "-i", "dialog-warning", title, msg],
+            timeout=2, capture_output=True,
+        )
+    except Exception:
+        pass
+
+
+def _on_tos_failure(remote_name: str, exc: Exception) -> bool:
+    """记一次 TOS 失败. 返回 True 表示应触发电路打开 (调用方降级 rsync 并通知)."""
+    with _TOS_CIRCUIT_LOCK:
+        streak = _TOS_FAILURE_STREAK.get(remote_name, 0) + 1
+        _TOS_FAILURE_STREAK[remote_name] = streak
+        already_open = remote_name in _TOS_CIRCUIT_OPEN_AT
+        if streak >= TOS_FAILURE_THRESHOLD and not already_open:
+            _TOS_CIRCUIT_OPEN_AT[remote_name] = time.time()
+            return True  # 此次触发 — caller 通知 + 降级
+    return False
+
+
+def _on_tos_success(remote_name: str) -> bool:
+    """记一次 TOS 成功. 返回 True 表示电路从打开状态恢复 (调用方通知 RECOVERED)."""
+    with _TOS_CIRCUIT_LOCK:
+        was_open = remote_name in _TOS_CIRCUIT_OPEN_AT
+        _TOS_FAILURE_STREAK[remote_name] = 0
+        if was_open:
+            _TOS_CIRCUIT_OPEN_AT.pop(remote_name, None)
+            try:
+                _TOS_CIRCUIT_MARKER.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return True
+    return False
+
+
 def _push_one_remote_episode(src_date: Path, task: str, date: str, subset: str,
                              episode_id: int, remote: Remote) -> None:
     """单 episode push, 根据 remote.transport 分派到 rsync 或 TOS 路径.
@@ -318,7 +388,11 @@ def _push_one_remote_episode(src_date: Path, task: str, date: str, subset: str,
     src_date 是 v2 layout 的 `<DATA_ROOT>/<task>/<subset>/<date>` 目录 (date 叶节点).
 
     **串行锁**: 同一 remote 同时只有一个 job 执行, 超出能力的慢链路自然 backlog
-    但不堆并发, 不产生 orphan 进程。"""
+    但不堆并发, 不产生 orphan 进程.
+
+    **TOS 电路 breaker**: 若该 remote 配置 transport=tos_via_gf1 但电路打开中,
+    自动降级走 _push_episode_via_rsync, 不再尝试 TOS. RETRY_AFTER 后才放行 1 次
+    探测, 成功就关电路."""
     lock = _get_remote_lock(remote.name)
     tag = f"[{remote.name}] {task}/{subset}/{date}/ep{episode_id:06d}"
     t_wait_start = time.time()
@@ -327,7 +401,16 @@ def _push_one_remote_episode(src_date: Path, task: str, date: str, subset: str,
         if wait_ms > 1000:
             _sync_log.info("%s waited %d ms for remote lock (backlog)", tag, wait_ms)
         if remote.transport == "tos_via_gf1":
-            _push_episode_via_tos(src_date, task, date, subset, episode_id, remote, tag)
+            if _tos_circuit_is_open(remote.name):
+                _sync_log.warning("%s TOS circuit OPEN — falling back to direct rsync", tag)
+                _push_episode_via_rsync(src_date, task, date, subset, episode_id, remote, tag)
+            else:
+                _push_episode_via_tos(src_date, task, date, subset, episode_id, remote, tag)
+        elif remote.transport == "tos_only":
+            if _tos_circuit_is_open(remote.name):
+                _sync_log.warning("%s TOS circuit OPEN — episode delayed (no rsync fallback in tos_only)", tag)
+                return
+            _push_episode_via_tos_only(src_date, task, date, subset, episode_id, remote, tag)
         else:  # rsync (default)
             _push_episode_via_rsync(src_date, task, date, subset, episode_id, remote, tag)
 
@@ -383,6 +466,88 @@ def _get_tos_client():
         return _TOS_CLIENT_LAZY
 
 
+def _push_episode_via_tos_only(src_date: Path, task: str, date: str, subset: str,
+                               episode_id: int, remote: Remote, tag: str) -> None:
+    """直接 per-file upload 到 TOS, 不 tar 不 ssh extract 不写 vePFS.
+
+    TOS object key = `<dest_root>/<task>/<subset>/<date>/<rel_path>` (= sim01 同名).
+    gf0/gf1 通过 /transfer-shanghai/KAI0 fuse 直读, 不需要落到 gpfs.
+
+    zarr 是目录, walk 内部 chunk 文件逐个 upload. 全量小于一个 ep tar 大小,
+    并行多线程 upload 与 tar+upload 总时长接近, 但去掉了 ssh extract 步骤.
+    """
+    cli = _get_tos_client()
+    bucket = _TOS_CREDS["bucket"]
+    prefix = (remote.dest_root or "KAI0").strip("/")
+    rel_subset = src_date.relative_to(DATA_ROOT)  # task/subset/date
+
+    # 列出本 ep 所有要上传的 (local_path, tos_key) 对
+    rel_paths = _episode_rel_paths(episode_id)
+    upload_pairs: list[tuple[Path, str]] = []
+    for rp in rel_paths:
+        local = src_date / rp.rstrip("/")
+        if local.is_dir():
+            # zarr / 目录: 递归找文件
+            for f in local.rglob("*"):
+                if f.is_file():
+                    rel_in_subset = f.relative_to(src_date)
+                    key = f"{prefix}/{rel_subset}/{rel_in_subset}"
+                    upload_pairs.append((f, key))
+        elif local.is_file():
+            key = f"{prefix}/{rel_subset}/{rp}"
+            upload_pairs.append((local, key))
+        # else: 文件不存在, skip (e.g. 部分相机无 depth)
+
+    if not upload_pairs:
+        _sync_log.warning("%s no files to upload (skip)", tag)
+        return
+
+    # 上传
+    t0 = time.time()
+    total_bytes = 0
+    n_done = 0
+    n_err = 0
+    last_err = None
+    for local, key in upload_pairs:
+        try:
+            cli.put_object_from_file(bucket, key, str(local))
+            n_done += 1
+            try:
+                total_bytes += local.stat().st_size
+            except OSError:
+                pass
+        except Exception as e:  # noqa: BLE001
+            n_err += 1
+            last_err = e
+            if n_err <= 3:
+                _sync_log.error("%s tos_only upload %s FAILED: %s", tag, key, e)
+
+    up_ms = int((time.time() - t0) * 1000)
+
+    if n_err > 0 and n_done == 0:
+        # 全失败 → TOS 电路 breaker
+        if _on_tos_failure(remote.name, last_err):
+            _sync_log.error(
+                "%s TOS CIRCUIT OPENED after %d consecutive failures",
+                tag, TOS_FAILURE_THRESHOLD,
+            )
+            _notify_user(
+                "kai0 sync: TOS DOWN",
+                f"{remote.name} tos_only upload 连续失败 {TOS_FAILURE_THRESHOLD} 次"
+            )
+        return
+
+    # 部分/全成功 — reset streak
+    if _on_tos_success(remote.name):
+        _sync_log.warning("%s TOS CIRCUIT CLOSED — TOS path restored", tag)
+
+    rate = total_bytes / max(up_ms / 1000, 0.001) / 1e6
+    _sync_log.info(
+        "%s tos_only ok files=%d/%d size=%dKB elapsed=%dms rate=%.1fMB/s err=%d",
+        tag, n_done, len(upload_pairs), total_bytes // 1024, up_ms, rate, n_err,
+    )
+
+
 def _push_episode_via_tos(src_date: Path, task: str, date: str, subset: str,
                           episode_id: int, remote: Remote, tag: str) -> None:
     """tar ep specific files → TOS → ssh gf1 extract from /transfer-shanghai fuse.
@@ -420,8 +585,27 @@ def _push_episode_via_tos(src_date: Path, task: str, date: str, subset: str,
     except Exception as e:
         _sync_log.error("%s TOS upload FAILED: %s", tag, e)
         tar_path.unlink(missing_ok=True)
+        # 记入电路 breaker; 连续失败到阈值时通知用户并切 rsync 旁路
+        if _on_tos_failure(remote.name, e):
+            _sync_log.error(
+                "%s TOS CIRCUIT OPENED after %d consecutive failures — "
+                "subsequent eps fall back to direct rsync until %ds re-probe",
+                tag, TOS_FAILURE_THRESHOLD, TOS_CIRCUIT_RETRY_AFTER_S,
+            )
+            _notify_user(
+                "kai0 sync: TOS DOWN",
+                f"{remote.name} TOS upload 连续失败 {TOS_FAILURE_THRESHOLD} 次, "
+                f"自动降级走 rsync. 详情: {_sync_log.handlers[0].baseFilename if _sync_log.handlers else 'sync.log'}"
+            )
         return
     up_ms = int((time.time() - t0) * 1000)
+    # 这次 TOS 成功 — 重置 streak; 若之前电路是开的, 通知恢复
+    if _on_tos_success(remote.name):
+        _sync_log.warning("%s TOS CIRCUIT CLOSED — TOS path restored", tag)
+        _notify_user(
+            "kai0 sync: TOS RECOVERED",
+            f"{remote.name} TOS 路径恢复, 自动切回 TOS 中转 (100 MB/s)."
+        )
 
     # 3. ssh gf1 extract tar from fuse → /vePFS (shared gpfs, gf0 immediately sees)
     t0 = time.time()

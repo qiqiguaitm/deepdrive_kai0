@@ -110,6 +110,15 @@ class MockBridge:
         # mock depth: 简单距离梯度 (mm)
         return ((_np.arange(640) + _np.arange(480)[:, None]).astype(_np.uint16) * 4)
 
+    def get_replay_progress(self) -> dict | None:
+        return None
+
+    def clear_replay_progress(self) -> None:
+        return
+
+    def publish_execute(self, enabled: bool) -> bool:
+        return False
+
     def get_state_action(self):
         js = self.get_joint_state()
         state = list(js["left_joints"]) + [js["left_gripper"]] + list(js["right_joints"]) + [js["right_gripper"]]
@@ -145,6 +154,11 @@ class RclpyBridge:
         self._JointState = msg_mods["JointState"]
         self._CameraInfo = msg_mods["CameraInfo"]
         self._qos_sensor = msg_mods["qos_sensor"]
+        # Replay (P2): subscribe /replay_progress, cache latest [idx, total, done].
+        self._Float32MultiArray = msg_mods.get("Float32MultiArray")
+        self._Bool = msg_mods.get("Bool")
+        self._replay_progress: dict | None = None  # {idx, total, done, ts}
+        self._replay_pub_execute = None  # publisher to /policy/execute (lazy)
 
         self._pipers = pipers_cfg["arms"]
         self._cameras = cameras_cfg["cameras"]
@@ -231,6 +245,18 @@ class RclpyBridge:
                         self._qos_sensor,
                     )
 
+            # Replay progress subscriber (P2). Float32MultiArray data = [idx, total, done].
+            if self._Float32MultiArray is not None:
+                self._node.create_subscription(
+                    self._Float32MultiArray, '/replay_progress',
+                    self._on_replay_progress, 5,
+                )
+            # Lazy publisher for /policy/execute (Bool) — created on first use to avoid
+            # consuming a publisher slot when replay is never invoked.
+            if self._Bool is not None:
+                self._replay_pub_execute = self._node.create_publisher(
+                    self._Bool, '/policy/execute', 5)
+
             self._executor = self._rclpy.executors.SingleThreadedExecutor()
             self._executor.add_node(self._node)
             self._started.set()
@@ -248,6 +274,50 @@ class RclpyBridge:
                     self._node.destroy_node()
             except Exception:  # noqa: BLE001
                 pass
+
+    # ---- Replay (P2) ----
+    def _on_replay_progress(self, msg) -> None:
+        """Cache latest /replay_progress: data = [idx, total, done_flag]."""
+        try:
+            data = list(msg.data)
+            if len(data) >= 3:
+                with self._lock:
+                    self._replay_progress = {
+                        "idx": int(data[0]),
+                        "total": int(data[1]),
+                        "done": bool(data[2] > 0.5),
+                        "ts": time.time(),
+                    }
+        except Exception:  # noqa: BLE001
+            pass
+
+    def get_replay_progress(self) -> dict | None:
+        """Return latest /replay_progress payload or None if never received.
+        Stale (>2s old) reports get age annotation but are still returned."""
+        with self._lock:
+            p = dict(self._replay_progress) if self._replay_progress else None
+        if p is not None:
+            p["age_s"] = max(0.0, time.time() - p.pop("ts"))
+        return p
+
+    def clear_replay_progress(self) -> None:
+        """Reset cached progress so a stale done=True from the previous run
+        doesn't bleed into the next session. Call right before firing execute."""
+        with self._lock:
+            self._replay_progress = None
+
+    def publish_execute(self, enabled: bool) -> bool:
+        """Publish std_msgs/Bool to /policy/execute. Returns True on success."""
+        if self._replay_pub_execute is None or self._Bool is None:
+            return False
+        try:
+            msg = self._Bool()
+            msg.data = bool(enabled)
+            self._replay_pub_execute.publish(msg)
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"[ros_bridge] publish_execute failed: {e}")
+            return False
 
     # ---- 回调 ----
     def _on_joint(self, arm_key: str, msg) -> None:
@@ -333,8 +403,10 @@ class RclpyBridge:
     def get_state_action(self):
         """返回 (state14, action14) float32 list。
         state = puppet(从臂) 关节 = 真实机器人当前位姿；
-        action = master(主臂) 关节 = 遥操作指令；无 master 时回落到 state。
+        默认 action = state（官方 KAI0 约定，模型当 state predictor 训）；
         顺序: [L_j1..L_j6, L_gripper, R_j1..R_j6, R_gripper] (7+7=14)。
+        Set KAI0_ACTION_EQ_STATE=0 to fall back to legacy bilateral capture
+        (action = master, fallback slave when master topic missing).
         """
         def _pick(key: str) -> list[float]:
             with self._lock:
@@ -345,18 +417,18 @@ class RclpyBridge:
             pos += [0.0] * (7 - len(pos))
             return pos
 
-        l_slave = _pick("left_slave")
-        r_slave = _pick("right_slave")
+        state = _pick("left_slave") + _pick("right_slave")
+        if os.environ.get("KAI0_ACTION_EQ_STATE", "1") == "1":
+            return state, list(state)
+
         l_master = _pick("left_master")
         r_master = _pick("right_master")
-        state = l_slave + r_slave
         with self._lock:
             has_lm = "left_master" in self._latest_joint
             has_rm = "right_master" in self._latest_joint
-        action_l = l_master if has_lm else l_slave
-        action_r = r_master if has_rm else r_slave
-        action = action_l + action_r
-        return state, action
+        action_l = l_master if has_lm else state[:7]
+        action_r = r_master if has_rm else state[7:]
+        return state, action_l + action_r
 
     def _on_cam_info(self, cam_name: str, msg) -> None:
         now = time.time()
@@ -477,11 +549,13 @@ def _make_bridge():
 
     try:
         import rclpy as _rclpy
+        from std_msgs.msg import Float32MultiArray, Bool as BoolMsg
         b = RclpyBridge(
             _rclpy,
             {
                 "JointState": JointState, "CameraInfo": CameraInfo, "Image": Image,
                 "PIL": PILImage, "np": np, "qos_sensor": qos_sensor,
+                "Float32MultiArray": Float32MultiArray, "Bool": BoolMsg,
             },
             pipers_cfg,
             cameras_cfg,

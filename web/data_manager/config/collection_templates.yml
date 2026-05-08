@@ -41,3 +41,9 @@ templates:
   prompt: 'pick and place '
   enabled: true
   note: TASK HP PIPER
+- id: task_p_stack
+  task_id: Task_PS
+  subset: base
+  prompt: Pick blue block,stack on red
+  enabled: true
+  note: Task PS base

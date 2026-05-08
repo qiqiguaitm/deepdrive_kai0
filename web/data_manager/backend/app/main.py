@@ -23,11 +23,28 @@ from .models import (
     StatsResponse,
     Template,
 )
+from . import replay as replay_mod
 from .recorder import recorder
 from .ros_bridge import bridge
 from .stats_service import service as stats
 from .status_hub import hub
 from .templates import store as templates
+
+
+class ReplayPreflightReq(BaseModel):
+    task: str
+    subset: str
+    date: str
+    episode_id: int
+
+
+class ReplayExecuteReq(BaseModel):
+    task: str
+    subset: str
+    date: str
+    episode_id: int
+    rate: float = 1.0
+    loop: bool = False
 
 
 def require_admin(x_role: Role = Header(default="collector")) -> Role:
@@ -374,6 +391,33 @@ def camera_snapshot(cam: str):
     if not jpeg:
         raise HTTPException(status_code=404, detail="no frame yet")
     return StreamingResponse(iter([jpeg]), media_type="image/jpeg")
+
+
+# -------- Replay (P2) --------
+@app.post("/api/replay/preflight")
+def api_replay_preflight(req: ReplayPreflightReq):
+    """Read-only: parquet metadata + pose alignment + deployment / publisher gates.
+    UI calls this when toggle is flipped ON, shows result, lets user confirm."""
+    return replay_mod.preflight(req.task, req.subset, req.date, req.episode_id)
+
+
+@app.post("/api/replay/execute")
+def api_replay_execute(req: ReplayExecuteReq, _: Role = Depends(require_admin)):
+    """Actually fire replay: param set + execute=true. Admin-only."""
+    return replay_mod.execute(req.task, req.subset, req.date, req.episode_id,
+                              rate=req.rate, loop=req.loop)
+
+
+@app.post("/api/replay/stop")
+def api_replay_stop(_: Role = Depends(require_admin)):
+    """Cleanup: execute=false + replay_mode=inference. Idempotent."""
+    return replay_mod.stop()
+
+
+@app.get("/api/replay/progress")
+def api_replay_progress():
+    """Latest /replay_progress (cached by ros_bridge subscriber)."""
+    return replay_mod.progress()
 
 
 # -------- WS --------
