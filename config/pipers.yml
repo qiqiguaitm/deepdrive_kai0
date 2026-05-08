@@ -1,11 +1,11 @@
 # Piper 双臂配置 — sim01 部署
-# 通过 calibrate_can_mapping.py 校准, 2026-05-08 13:18
+# 通过 calibrate_can_mapping.py 校准, 2026-05-08 17:21
 #
 # 启动前运行: bash can_tools/setup_can.sh --quick
 
 arms:
   left_master:
-    can_physical: can0
+    can_physical: can2
     can_symbolic: can_left_mas
     usb_bus_info: "3-2.2.2:1.0"
     role: 左臂 (master)
@@ -16,7 +16,7 @@ arms:
     ros2_topic_joint: /master/joint_left
 
   left_slave:
-    can_physical: can2
+    can_physical: can3
     can_symbolic: can_left_slave
     usb_bus_info: "3-2.2.1:1.0"
     role: 左臂 (slave)
@@ -27,7 +27,7 @@ arms:
     ros2_topic_joint: /puppet/joint_left
 
   right_master:
-    can_physical: can1
+    can_physical: can0
     can_symbolic: can_right_mas
     usb_bus_info: "3-2.2.3:1.0"
     role: 右臂 (master)
@@ -38,7 +38,7 @@ arms:
     ros2_topic_joint: /master/joint_right
 
   right_slave:
-    can_physical: can3
+    can_physical: can1
     can_symbolic: can_right_slave
     usb_bus_info: "3-2.2.4:1.0"
     role: 右臂 (slave)

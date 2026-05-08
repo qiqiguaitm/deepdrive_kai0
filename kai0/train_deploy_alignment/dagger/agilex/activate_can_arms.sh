@@ -1,6 +1,6 @@
 #!/bin/bash
 # Activate all four USB-CAN interfaces for dual master + dual slave.
-# 由 calibrate_can_mapping.py 自动生成, 2026-05-08 13:18
+# 由 calibrate_can_mapping.py 自动生成, 2026-05-08 17:21
 #
 # sim01 bus-info 映射:
 #   3-2.2.2:1.0 → can_left_mas (左 master (示教左臂))
