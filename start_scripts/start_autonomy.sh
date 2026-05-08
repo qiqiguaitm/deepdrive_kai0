@@ -1,28 +1,40 @@
 #!/bin/bash
 ###############################################################################
-# kai0 自主运行 + Rerun 可视化 一键启动 (autonomy_launch + rerun)
+# kai0 Autonomy / Replay 一键启动 (单一入口, 支持 model→arms 与 replay→arms/sim)
+#
+# 三种模式:
+#   1) Autonomy (默认)        模型 → 真实机械臂      autonomy_launch.py
+#                              cameras + policy_inference + arms (slave)
+#   2) Replay (real arms)     回放数据 → 真实机械臂  replay_launch.py
+#                              replay_node + arms (slave); 无 cameras / 无 JAX
+#   3) Replay (sim)           回放数据 → 仿真      replay_launch.py + enable_real_arms:=false
+#                              仅 replay_node 发 /master/joint_*; 不驱动 CAN/真机
 #
 # 用法:
-#   ./scripts/start_autonomy.sh                    # 默认: ros2 模式 + Rerun
-#   ./scripts/start_autonomy.sh --no-rerun         # 不启动 Rerun
-#   ./scripts/start_autonomy.sh --mode websocket   # WebSocket 模式
-#   ./scripts/start_autonomy.sh --execute          # 直接进入执行模式
+#   ./scripts/start_autonomy.sh                         # 1: 默认 autonomy
+#   ./scripts/start_autonomy.sh --no-rerun              # autonomy 不要 Rerun
+#   ./scripts/start_autonomy.sh --mode websocket        # autonomy WebSocket
+#   ./scripts/start_autonomy.sh --execute               # autonomy 直接执行
+#   ./scripts/start_autonomy.sh --replay                # 2: 回放真机
+#   ./scripts/start_autonomy.sh --replay --sim          # 3: 回放仿真
 #
-# 流程:
-#   1. 清理残留进程
-#   2. USB 相机 reset
-#   3. CAN 激活
-#   4. 依赖检查
-#   5. colcon build (如果源码比 install 新)
-#   6. 启动 ros2 launch
+# Marker (/tmp/kai0_deployment_mode):
+#   autonomy 模式 → "autonomy"; replay 模式 (real/sim 同) → "replay"
+#   两者均能通过 backend `/api/replay/preflight` 的 marker 校验.
+#
+# 后续触发回放: 用 web 数据管理 UI (data_manager) 或 CLI:
+#   ./scripts/start_replay_test.sh <task>/<subset>/<date>/<ep_id>
 ###############################################################################
 
 set -eo pipefail
 
 # ── 参数解析 ──
-MODE="ros2"
+MODE="ros2"          # autonomy 模式下的 policy 通信通道 (ros2|websocket|both)
 ENABLE_RERUN="true"
 EXECUTE_MODE="false"
+REPLAY="false"       # true = 走 playback_launch (回放数据 + rerun, 与 autonomy 同架构)
+SIM="false"          # true 仅在 REPLAY 下有意义 — 不驱动 CAN/真机
+EPISODE=""           # replay 模式必填: <task>/<subset>/<date>/<ep_id> 或绝对 parquet 路径
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -30,9 +42,45 @@ while [[ $# -gt 0 ]]; do
         --mode)       MODE="$2"; shift 2 ;;
         --no-rerun)   ENABLE_RERUN="false"; shift ;;
         --execute)    EXECUTE_MODE="true"; shift ;;
+        --replay)     REPLAY="true"; shift ;;
+        --sim)        SIM="true"; shift ;;
+        --episode)    EPISODE="$2"; shift 2 ;;
         *)            EXTRA_ARGS+=("$1"); shift ;;
     esac
 done
+
+if [[ "$SIM" == "true" && "$REPLAY" != "true" ]]; then
+    echo "[FAIL] --sim 必须配合 --replay 使用 (autonomy 默认就是真机, sim 仅适用于 replay)" >&2
+    exit 1
+fi
+
+if [[ "$REPLAY" == "true" && -z "$EPISODE" ]]; then
+    echo "[FAIL] --replay 必须配合 --episode <task/subset/date/ep_id> 或绝对 parquet 路径" >&2
+    exit 1
+fi
+
+# Resolve --episode → absolute parquet path
+EPISODE_PATH=""
+if [[ "$REPLAY" == "true" ]]; then
+    KAI0_DATA_ROOT="${KAI0_DATA_ROOT:-/data1/DATA_IMP/KAI0}"
+    if [[ "$EPISODE" == /* && -f "$EPISODE" ]]; then
+        EPISODE_PATH="$EPISODE"
+    else
+        # parse <task>/<subset>/<date>/<ep_id>
+        IFS='/' read -ra _PARTS <<< "$EPISODE"
+        if [[ ${#_PARTS[@]} -ne 4 ]]; then
+            echo "[FAIL] --episode 期望 'task/subset/date/ep_id' (4 段), 收到 '$EPISODE'" >&2
+            exit 1
+        fi
+        _T="${_PARTS[0]}"; _S="${_PARTS[1]}"; _D="${_PARTS[2]}"; _E="${_PARTS[3]}"
+        printf -v _EP6 '%06d' "$_E" 2>/dev/null || { echo "[FAIL] ep_id 非整数: $_E" >&2; exit 1; }
+        EPISODE_PATH="$KAI0_DATA_ROOT/$_T/$_S/$_D/data/chunk-000/episode_${_EP6}.parquet"
+    fi
+    if [[ ! -f "$EPISODE_PATH" ]]; then
+        echo "[FAIL] parquet not found: $EPISODE_PATH" >&2
+        exit 1
+    fi
+fi
 
 # ── 路径 ──
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -46,16 +94,31 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 fail() { echo -e "${RED}[FAIL]${NC} $1"; exit 1; }
 info() { echo -e "${CYAN}[INFO]${NC} $1"; }
 
+if [[ "$REPLAY" == "true" ]]; then
+    if [[ "$SIM" == "true" ]]; then
+        STACK_LABEL="Replay (sim — no real arms)"
+    else
+        STACK_LABEL="Replay (real arms)"
+    fi
+else
+    STACK_LABEL="Autonomy (model → real arms)"
+fi
+
 echo "============================================================"
-echo " kai0 Autonomy + Visualization"
-echo " Mode: $MODE | Rerun: $ENABLE_RERUN | Execute: $EXECUTE_MODE"
+echo " kai0 Launcher: $STACK_LABEL"
+[[ "$REPLAY" != "true" ]] && echo " Mode: $MODE | Rerun: $ENABLE_RERUN | Execute: $EXECUTE_MODE"
 echo "============================================================"
 
 # ── 1. 清理残留进程 ──
 echo ""
 echo "--- Step 1: 清理残留进程 ---"
 
-KILL_PATTERNS="realsense2_camera_node|arm_reader_node|arm_teleop_node|policy_inference_node|rerun_viz_node|multi_camera_node|autonomy_launch"
+# Replay stack: 只清自身相关进程; autonomy: 多清 policy/rerun/cameras
+if [[ "$REPLAY" == "true" ]]; then
+    KILL_PATTERNS="arm_reader_node|replay_node|replay_launch"
+else
+    KILL_PATTERNS="realsense2_camera_node|arm_reader_node|arm_teleop_node|policy_inference_node|rerun_viz_node|multi_camera_node|autonomy_launch|replay_node|replay_launch"
+fi
 PIDS=$(ps aux | grep -E "$KILL_PATTERNS" | grep -v grep | grep -v $$ | awk '{print $2}' || true)
 if [ -n "$PIDS" ]; then
     COUNT=$(echo "$PIDS" | wc -w)
@@ -73,90 +136,116 @@ source /opt/ros/jazzy/setup.bash
 ros2 daemon stop 2>/dev/null || true
 ros2 daemon start 2>/dev/null || true
 
-# ── 2. USB 相机 reset ──
-echo ""
-echo "--- Step 2: USB camera reset ---"
+# ── 2. USB 相机 reset (autonomy 才需要; replay/sim 跳过) ──
+if [[ "$REPLAY" != "true" ]]; then
+    echo ""
+    echo "--- Step 2: USB camera reset ---"
 
-# Reset USB ports to clear stale device state.
-# Uses `sudo tee` (not `sudo bash -c`) so /etc/sudoers.d/kai0-autonomy can
-# grant NOPASSWD on an exact command pattern.
-for dev in 2-1 2-2 4-2.2; do
-    auth="/sys/bus/usb/devices/$dev/authorized"
-    if [ -e "$auth" ]; then
-        echo 0 | sudo -n tee "$auth" >/dev/null 2>&1 || true
-        sleep 0.5
-        echo 1 | sudo -n tee "$auth" >/dev/null 2>&1 || true
+    # Reset USB ports to clear stale device state.
+    # Uses `sudo tee` (not `sudo bash -c`) so /etc/sudoers.d/kai0-autonomy can
+    # grant NOPASSWD on an exact command pattern.
+    for dev in 2-1 2-2 4-2.2; do
+        auth="/sys/bus/usb/devices/$dev/authorized"
+        if [ -e "$auth" ]; then
+            echo 0 | sudo -n tee "$auth" >/dev/null 2>&1 || true
+            sleep 0.5
+            echo 1 | sudo -n tee "$auth" >/dev/null 2>&1 || true
+        fi
+    done
+    sleep 3
+
+    CAM_COUNT=$(lsusb | grep -c "Intel.*RealSense" 2>/dev/null || echo 0)
+    if [ "$CAM_COUNT" -ge 3 ]; then
+        ok "3 RealSense cameras detected"
+    elif [ "$CAM_COUNT" -ge 2 ]; then
+        warn "only $CAM_COUNT cameras (need 3)"
+    else
+        fail "only $CAM_COUNT cameras, check USB"
     fi
-done
-sleep 3
-
-CAM_COUNT=$(lsusb | grep -c "Intel.*RealSense" 2>/dev/null || echo 0)
-if [ "$CAM_COUNT" -ge 3 ]; then
-    ok "3 RealSense cameras detected"
-elif [ "$CAM_COUNT" -ge 2 ]; then
-    warn "only $CAM_COUNT cameras (need 3)"
 else
-    fail "only $CAM_COUNT cameras, check USB"
+    info "skip USB camera reset (replay 模式无需相机)"
 fi
 
-# ── 3. CAN 激活 ──
-echo ""
-echo "--- Step 3: CAN activation ---"
+# ── 3. CAN 激活 (sim 跳过, 否则需要驱动机械臂) ──
+if [[ "$SIM" != "true" ]]; then
+    echo ""
+    echo "--- Step 3: CAN activation ---"
 
-CAN_UP=0
-for iface in can_left_mas can_left_slave can_right_mas can_right_slave; do
-    if ip link show "$iface" &>/dev/null; then
-        sudo -n ip link set "$iface" down 2>/dev/null || true
-        sudo -n ip link set "$iface" type can bitrate 1000000 2>/dev/null || true
-        sudo -n ip link set "$iface" up 2>/dev/null || true
-        CAN_UP=$((CAN_UP + 1))
-        ok "$iface up"
+    CAN_UP=0
+    if [[ "$REPLAY" == "true" ]]; then
+        # replay 只用 slave (mode=1 arm_reader 订阅 /master/joint_* → CAN)
+        IFACES="can_left_slave can_right_slave"
+    else
+        IFACES="can_left_mas can_left_slave can_right_mas can_right_slave"
     fi
-done
+    for iface in $IFACES; do
+        if ip link show "$iface" &>/dev/null; then
+            sudo -n ip link set "$iface" down 2>/dev/null || true
+            sudo -n ip link set "$iface" type can bitrate 1000000 2>/dev/null || true
+            sudo -n ip link set "$iface" up 2>/dev/null || true
+            CAN_UP=$((CAN_UP + 1))
+            ok "$iface up"
+        fi
+    done
 
-if [ "$CAN_UP" -ge 4 ]; then
-    ok "$CAN_UP CAN interfaces up (dual arm master+slave)"
-elif [ "$CAN_UP" -ge 2 ]; then
-    warn "only $CAN_UP CAN interfaces (need 4 for dual arm master+slave)"
+    if [[ "$REPLAY" == "true" ]]; then
+        if [ "$CAN_UP" -ge 2 ]; then
+            ok "$CAN_UP CAN interfaces up (replay slave-only)"
+        else
+            warn "only $CAN_UP CAN interfaces (replay needs 2: left+right slave)"
+        fi
+    else
+        if [ "$CAN_UP" -ge 4 ]; then
+            ok "$CAN_UP CAN interfaces up (dual arm master+slave)"
+        elif [ "$CAN_UP" -ge 2 ]; then
+            warn "only $CAN_UP CAN interfaces (need 4 for dual arm master+slave)"
+        else
+            warn "only $CAN_UP CAN interfaces"
+        fi
+    fi
 else
-    warn "only $CAN_UP CAN interfaces"
+    info "skip CAN activation (--sim: 不驱动真机)"
 fi
 
-# ── 4. 依赖检查 ──
+# ── 4. 依赖检查 (replay 不需要 venv/serve_policy) ──
 echo ""
 echo "--- Step 4: dependency check ---"
 
-# venv
-if [ -f "$KAI0_DIR/.venv/bin/python" ]; then
-    ok "venv: $($KAI0_DIR/.venv/bin/python --version 2>&1)"
-else
-    fail "venv not found: $KAI0_DIR/.venv/"
+if [[ "$REPLAY" != "true" ]]; then
+    # venv (autonomy 需要 JAX)
+    if [ -f "$KAI0_DIR/.venv/bin/python" ]; then
+        ok "venv: $($KAI0_DIR/.venv/bin/python --version 2>&1)"
+    else
+        fail "venv not found: $KAI0_DIR/.venv/"
+    fi
 fi
 
-# ROS2 workspace
+# ROS2 workspace (两种模式都要)
 if [ -f "$ROS2_WS/install/setup.bash" ]; then
     ok "ROS2 workspace: $ROS2_WS"
 else
     fail "ROS2 workspace not built: run 'cd $ROS2_WS && colcon build'"
 fi
 
-# Calibration
-CALIB_FILE="$PROJECT_ROOT/config/calibration.yml"
-if [ -f "$CALIB_FILE" ]; then
-    ok "calibration: $CALIB_FILE"
-else
-    warn "calibration not found: $CALIB_FILE (FK visualization will be disabled)"
-fi
-
-# serve_policy (websocket mode)
-if [ "$MODE" = "websocket" ] || [ "$MODE" = "both" ]; then
-    if ss -tlnp 2>/dev/null | grep -q ":8000 "; then
-        ok "serve_policy running on :8000"
+if [[ "$REPLAY" != "true" ]]; then
+    # Calibration
+    CALIB_FILE="$PROJECT_ROOT/config/calibration.yml"
+    if [ -f "$CALIB_FILE" ]; then
+        ok "calibration: $CALIB_FILE"
     else
-        fail "serve_policy not running on :8000. Start it first:
+        warn "calibration not found: $CALIB_FILE (FK visualization will be disabled)"
+    fi
+
+    # serve_policy (websocket mode)
+    if [ "$MODE" = "websocket" ] || [ "$MODE" = "both" ]; then
+        if ss -tlnp 2>/dev/null | grep -q ":8000 "; then
+            ok "serve_policy running on :8000"
+        else
+            fail "serve_policy not running on :8000. Start it first:
     cd $KAI0_DIR && CUDA_VISIBLE_DEVICES=1 JAX_COMPILATION_CACHE_DIR=/tmp/xla_cache \\
       .venv/bin/python scripts/serve_policy.py --port 8000 policy:checkpoint \\
       --policy.config=pi05_flatten_fold_normal --policy.dir=checkpoints/Task_A/mixed_1"
+        fi
     fi
 fi
 
@@ -192,8 +281,46 @@ echo "--- Step 6: launching ---"
 source /opt/ros/jazzy/setup.bash
 source "$ROS2_WS/install/setup.bash"
 
-# Add venv bin to PATH (for rerun CLI)
-export PATH="$KAI0_DIR/.venv/bin:$PATH"
+# Add venv bin to PATH (for rerun CLI). Replay 不依赖 venv 里的 jax/openpi 但保留无害.
+[ -d "$KAI0_DIR/.venv/bin" ] && export PATH="$KAI0_DIR/.venv/bin:$PATH"
+
+# Unset proxy vars that can interfere with JAX/gRPC
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY 2>/dev/null || true
+
+# ── 部署模式 marker ──
+# autonomy → "autonomy"; replay (real or sim) → "replay".
+# Backend `/api/replay/preflight` 接受任一即可放行 replay.
+if [[ "$REPLAY" == "true" ]]; then
+    echo replay > /tmp/kai0_deployment_mode
+    info "deployment marker = replay"
+    info "episode parquet  : $EPISODE_PATH"
+    if [[ "$SIM" == "true" ]]; then
+        info "mode             : SIM (no real arms; /master→/puppet relay for pose alignment)"
+        ENABLE_REAL_ARMS=false
+    else
+        info "mode             : REAL (arm_reader slave drives CAN)"
+        ENABLE_REAL_ARMS=true
+    fi
+    # rerun_viz_node uses JAX for FK; on Blackwell (RTX 5090, sm_120) jax 0.5.x's
+    # XLA autotuner SIGSEGVs during compile. autonomy mode sets these vars
+    # later in the script; in replay mode we exec the launch right here so we
+    # need to set them BEFORE the exec.
+    export JAX_COMPILATION_CACHE_DIR=/tmp/xla_cache
+    mkdir -p /tmp/xla_cache
+    export XLA_FLAGS="--xla_gpu_autotune_level=0"
+    info "JAX env           : XLA_FLAGS=$XLA_FLAGS, cache=$JAX_COMPILATION_CACHE_DIR"
+    echo ""
+    info "starting ros2 launch piper playback_launch.py (architecture parity with autonomy)"
+    echo "  Ctrl+C to stop"
+    echo ""
+    exec ros2 launch piper playback_launch.py \
+        episode_path:="$EPISODE_PATH" \
+        enable_real_arms:="$ENABLE_REAL_ARMS" \
+        enable_rerun:="$ENABLE_RERUN" \
+        "${EXTRA_ARGS[@]}"
+fi
+
+# ── Autonomy 专属: GPU + JAX 配置 ──
 export JAX_COMPILATION_CACHE_DIR=/tmp/xla_cache
 mkdir -p /tmp/xla_cache
 
@@ -245,8 +372,6 @@ fi
 FREE_MB=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits -i "$GPU_ID" 2>/dev/null || echo "?")
 info "using GPU $GPU_ID (free: ${FREE_MB}MB, threshold: ${MIN_FREE_MB}MB)"
 
-# Unset proxy vars that can interfere with JAX/gRPC
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY 2>/dev/null || true
 # Blackwell (RTX 5090 / sm_120) workaround: jax/jaxlib 0.5.3's XLA autotuner
 # SIGSEGVs during π₀ backend_compile. Disabling autotune costs ~5-20% infer
 # speed but is the only fix short of upgrading jax to ≥0.6.x.
@@ -258,16 +383,14 @@ echo "  Rerun:   $ENABLE_RERUN"
 echo "  Execute: $EXECUTE_MODE"
 echo "  GPU:     $GPU_ID"
 echo ""
-info "starting ros2 launch..."
-echo "  Ctrl+C to stop all nodes"
-echo ""
 
 # ── Deployment mode marker (P1: replay function safety gate) ──
 # Lets `replay_mode=replay` pass `_verify_deployment_marker()` check.
-# Marker stays after Ctrl+C (exec replaces shell, no trap fire); next run of
-# start_*.sh overwrites; data_collect stop explicitly removes. Stale marker
-# is fine because publisher_conflict_check (defense layer 2) catches it.
 echo autonomy > /tmp/kai0_deployment_mode
+
+info "starting ros2 launch piper autonomy_launch.py..."
+echo "  Ctrl+C to stop all nodes"
+echo ""
 
 exec ros2 launch piper autonomy_launch.py \
     mode:="$MODE" \

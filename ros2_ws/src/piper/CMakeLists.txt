@@ -11,6 +11,8 @@ install(PROGRAMS
   scripts/replay_node.py
   scripts/rerun_viz_node.py
   scripts/multi_camera_node.py
+  scripts/video_publisher_node.py
+  scripts/joint_state_loopback_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

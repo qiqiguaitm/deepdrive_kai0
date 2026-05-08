@@ -88,6 +88,14 @@ class ReplayNode(Node):
         self.declare_parameter("replay_auto_home", True)
         self.declare_parameter("replay_home_duration", 3.0)
         self.declare_parameter("publish_rate", 30)
+        # Blocking mode: don't advance to next action until /puppet has reached the
+        # currently-published one. Required for real-arm replay where the arm can
+        # lag the publish timer; without it we drift off the recorded trajectory.
+        # In sim (loopback puts /master back to /puppet instantly) blocking is a
+        # no-op (diff ≈ 0).
+        self.declare_parameter("replay_blocking", True)
+        self.declare_parameter("replay_blocking_tolerance_rad", float(np.deg2rad(2.0)))
+        self.declare_parameter("replay_blocking_timeout_s", 1.0)
 
         self._replay_mode = str(self.get_parameter("replay_mode").value)
         self._replay_rate = max(0.5, min(1.5, float(self.get_parameter("replay_rate").value)))
@@ -95,6 +103,11 @@ class ReplayNode(Node):
         self._replay_auto_home = _to_bool(self.get_parameter("replay_auto_home").value)
         self._replay_home_duration = max(1.0, min(10.0, float(self.get_parameter("replay_home_duration").value)))
         self.publish_rate = int(self.get_parameter("publish_rate").value)
+        self._replay_blocking = _to_bool(self.get_parameter("replay_blocking").value)
+        self._replay_blocking_tolerance_rad = float(self.get_parameter("replay_blocking_tolerance_rad").value)
+        self._replay_blocking_timeout_s = float(self.get_parameter("replay_blocking_timeout_s").value)
+        self._block_wait_start_ts = 0.0   # time.monotonic when current target was published
+        self._block_warn_last_ts = 0.0
 
         # ── State ──
         self._sensor_lock = threading.Lock()
@@ -113,6 +126,10 @@ class ReplayNode(Node):
         self._replay_path = ""
         self._replay_parquet_fps = float(self.publish_rate)
         self._replay_buffer_total = 0
+        # Persisted across ticks so /replay_progress can emit the source-mp4 frame
+        # index to keep video_publisher in lockstep through home pad + resampling.
+        self._replay_home_n = 0
+        self._replay_episode_T_resampled = 0
         self._replay_aligned_threshold_rad = float(np.deg2rad(5.0))
         self._replay_progress_last_ts = 0.0
         self._replay_info_last_ts = 0.0
@@ -140,7 +157,22 @@ class ReplayNode(Node):
 
         self.get_logger().info(
             f"[REPLAY] node ready. publish_rate={self.publish_rate} Hz, "
-            f"mode={self._replay_mode}, auto_home={self._replay_auto_home}")
+            f"mode={self._replay_mode}, auto_home={self._replay_auto_home}, "
+            f"blocking={self._replay_blocking} (tol={np.degrees(self._replay_blocking_tolerance_rad):.1f}° "
+            f"timeout={self._replay_blocking_timeout_s:.2f}s)")
+
+        # `declare_parameter` does NOT fire on_set callbacks for initial values
+        # passed in via the launch file, so a non-empty replay_episode_path
+        # given at launch time would be registered but never actually load the
+        # parquet. Apply it eagerly here so the kicker's later
+        # `ros2 param set /replay replay_mode replay` finds an episode loaded.
+        init_ep = str(self.get_parameter("replay_episode_path").value)
+        if init_ep:
+            ok, msg = self._load_replay_episode(init_ep)
+            if not ok:
+                self.get_logger().warn(
+                    f"[REPLAY] init episode load failed: {msg}; "
+                    f"set replay_episode_path manually later")
 
     # ── Sensor callbacks ──
     def _cb_joint_left(self, msg):
@@ -200,6 +232,13 @@ class ReplayNode(Node):
                     self._replay_auto_home = _to_bool(p.value)
                 elif p.name == "replay_home_duration":
                     self._replay_home_duration = max(1.0, min(10.0, float(p.value)))
+                elif p.name == "replay_blocking":
+                    self._replay_blocking = _to_bool(p.value)
+                    self.get_logger().info(f"replay_blocking → {self._replay_blocking}")
+                elif p.name == "replay_blocking_tolerance_rad":
+                    self._replay_blocking_tolerance_rad = max(0.001, float(p.value))
+                elif p.name == "replay_blocking_timeout_s":
+                    self._replay_blocking_timeout_s = max(0.05, float(p.value))
                 elif p.name == "replay_mode":
                     new_rm = str(p.value)
                     if new_rm not in ("inference", "replay", "idle"):
@@ -388,6 +427,8 @@ class ReplayNode(Node):
             self.stream_buffer.last_action = None
         with self._replay_lock:
             self._replay_buffer_total = int(actions.shape[0])
+            self._replay_home_n = int(home_n)
+            self._replay_episode_T_resampled = int(actions.shape[0] - home_n)
         self.get_logger().info(
             f"[REPLAY] entered replay: buffer={actions.shape[0]} frames "
             f"(home={home_n} + episode={actions.shape[0]-home_n}), "
@@ -413,16 +454,36 @@ class ReplayNode(Node):
         with self._replay_lock:
             actions = self._replay_actions
             total = self._replay_buffer_total
+            home_n = self._replay_home_n
+            ep_T_resampled = self._replay_episode_T_resampled
         if actions is None or total <= 0:
             return
         with self.stream_buffer.lock:
             remaining = len(self.stream_buffer.cur_chunk)
         idx = max(0, total - remaining)
         done = (remaining == 0)
+
+        # Map current buffer slot → source-parquet/mp4 frame index. During the
+        # auto-home prepend hold the source frame at 0; during the resampled
+        # episode play the video at its own native rate (linear ratio).
+        T_orig = int(actions.shape[0])
+        if idx < home_n:
+            video_frame_idx = 0
+        else:
+            ep_idx = idx - home_n
+            if ep_T_resampled > 1 and T_orig > 1:
+                video_frame_idx = int(round(ep_idx * (T_orig - 1) / (ep_T_resampled - 1)))
+            else:
+                video_frame_idx = ep_idx
+            video_frame_idx = max(0, min(T_orig - 1, video_frame_idx))
+
         now = time.monotonic()
         if now - self._replay_progress_last_ts >= 0.1 or done:
             msg = Float32MultiArray()
-            msg.data = [float(idx), float(total), 1.0 if done else 0.0]
+            # data layout (extended; legacy subscribers only read first 3):
+            #   [buffer_idx, buffer_total, done_flag, source_video_frame_idx]
+            msg.data = [float(idx), float(total), 1.0 if done else 0.0,
+                        float(video_frame_idx)]
             try:
                 self.pub_replay_progress.publish(msg)
             except Exception:  # noqa: BLE001
@@ -455,7 +516,44 @@ class ReplayNode(Node):
             enabled = self._execution_enabled
         if not enabled:
             self._last_published_action = None
+            self._block_wait_start_ts = 0.0
             return
+
+        # ── Blocking gate: wait until /puppet has reached the LAST published
+        # action before popping the next one. Ensures the arm actually traces
+        # every state in the recorded trajectory; without this, fixed-rate
+        # publishing outruns the arm and the rest of the trajectory plays out
+        # relative to a stale start pose.
+        if self._replay_blocking and self._last_published_action is not None:
+            with self._sensor_lock:
+                jl = self._joint_left_deque[-1] if self._joint_left_deque else None
+                jr = self._joint_right_deque[-1] if self._joint_right_deque else None
+            current = None
+            if jl is not None and jr is not None:
+                ql = np.asarray(jl.position[:7], dtype=np.float32)
+                qr = np.asarray(jr.position[:7], dtype=np.float32)
+                if len(ql) >= 7 and len(qr) >= 7:
+                    current = np.concatenate([ql, qr])
+            if current is not None:
+                diff = np.abs(self._last_published_action[:14] - current[:14])
+                max_diff = float(diff.max())
+                if max_diff > self._replay_blocking_tolerance_rad:
+                    # Not yet reached → don't advance. Repeat the last published
+                    # action so the controller keeps holding the target.
+                    elapsed = time.monotonic() - self._block_wait_start_ts
+                    if (elapsed > self._replay_blocking_timeout_s and
+                            time.monotonic() - self._block_warn_last_ts > 1.0):
+                        self.get_logger().warn(
+                            f"[REPLAY] blocking timeout ({elapsed:.2f}s > "
+                            f"{self._replay_blocking_timeout_s:.2f}s): "
+                            f"max_Δ={np.degrees(max_diff):.2f}° > "
+                            f"{np.degrees(self._replay_blocking_tolerance_rad):.2f}° tol — "
+                            f"arm not keeping up; trajectory will lag")
+                        self._block_warn_last_ts = time.monotonic()
+                    self._republish_last_target()
+                    return
+                # reached — fall through to pop next
+
         act = self.stream_buffer.pop_next_action()
         if act is None:
             return
@@ -479,6 +577,7 @@ class ReplayNode(Node):
                 self._flush_stale_buffer()
                 return
         self._last_published_action = act.copy()
+        self._block_wait_start_ts = time.monotonic()
 
         left = act[:7].copy()
         right = act[7:14].copy()
@@ -486,6 +585,26 @@ class ReplayNode(Node):
         left[6] = max(0.0, float(left[6]))
         right[6] = max(0.0, float(right[6]))
 
+        now = self.get_clock().now().to_msg()
+        for pub, values in [(self.pub_left, left), (self.pub_right, right)]:
+            msg = JointState()
+            msg.header.stamp = now
+            msg.name = ["joint0", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+            msg.position = values.tolist()
+            pub.publish(msg)
+
+    def _republish_last_target(self):
+        """Re-emit `self._last_published_action` while blocking — keeps the
+        downstream controller actively driving toward the target instead of
+        going idle. /replay_progress idx is NOT advanced (no new action popped),
+        so video_publisher correctly holds on the same frame too."""
+        if self._last_published_action is None:
+            return
+        act = self._last_published_action
+        left = act[:7].copy()
+        right = act[7:14].copy()
+        left[6] = max(0.0, float(left[6]))
+        right[6] = max(0.0, float(right[6]))
         now = self.get_clock().now().to_msg()
         for pub, values in [(self.pub_left, left), (self.pub_right, right)]:
             msg = JointState()
