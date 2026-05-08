@@ -36,6 +36,9 @@ kai0/dagger_stage_viz
 kai0/label_sanity_viz
 validation_data/
 
+# ===== Raw data (calibration / sensor capture) =====
+calib/data/
+
 # ===== ROS / build outputs =====
 install/
 ros2_ws/install/
