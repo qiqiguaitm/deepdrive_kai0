@@ -29,7 +29,7 @@
 set -eo pipefail
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
-WORKSPACE="/data1/tim/workspace/deepdive_kai0"
+WORKSPACE=${WORKSPACE:-"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"}
 KAI0_DIR="${WORKSPACE}/kai0"
 ROS2_WS="${WORKSPACE}/ros2_ws"
 ROS_DISTRO="jazzy"
