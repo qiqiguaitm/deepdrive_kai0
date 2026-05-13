@@ -65,9 +65,14 @@
 | 服务器 | 工作目录 | 实际存储 |
 |---|---|---|
 | gf0 | `/vePFS/tim/workspace/deepdive_kai0/` (= `/home/tim/workspace/deepdive_kai0` 软链) | gpfs 跨机共享 |
-| gf1 | 同 gf0 (共享) | 同 |
+| ~~gf1~~ | 同 gf0 (共享) | 同 |
 | uc01 | `/home/tim/workspace/deepdive_kai0/` → `/data/shared/tim/workspace/deepdive_kai0/` | 本机 4TB ext4 |
 | uc02 | 同 uc01 (各自独立, 不共享) | 同 uc01 |
+| uc03 | 同 uc01 (各自独立) | 同 uc01 + 本机 `/nix` 3.5T NVMe |
+| **js01** | `/mnt/data/tim/workspace/deepdive_kai0/` (= `/home/tim/workspace/deepdive_kai0` 软链) | JuiceFS:visincept 共享, 跨 js01-04 |
+| **js02** | 同 js01 (共享) | 同 |
+| **js03** | 同 js01 (共享) | 同 |
+| **js04** | 同 js01 (共享) | 同 |
 
 ### 2.2 Checkpoint 本地存储规范 ⭐ (2026-05-04 重要更新)
 
@@ -81,6 +86,11 @@
 | ~~gf1~~ (已退役) | symlink → `/vePFS/tim/gf1_local_ckpts/` | /vePFS | 已下线 | — |
 | uc01 | 真实 dir | /dev/vda2 (492G ext4) | ~290G 可用 | ✓ 持久 |
 | uc02 | 真实 dir | /dev/vda2 (492G ext4) | ~410G 可用 | ✓ 持久 |
+| uc03 | 真实 dir | /dev/vda2 (492G ext4) | (待测) | ✓ 持久 |
+| **js01** | symlink → `/DATA/disk0/tim/local_ckpts/` | 本机 NVMe ext4 14T | ~14T 可用 | ✓ 持久 |
+| **js02** | symlink → `/DATA/disk0/tim/local_ckpts/` | 本机 NVMe ext4 (14T 池) | ~14T 可用 | ✓ 持久 |
+| **js03** | symlink → `/DATA/disk0/tim/local_ckpts/` | 本机 NVMe ext4 (**28T** 池) | ~28T 可用 ⭐ | ✓ 持久 |
+| **js04** | symlink → `/DATA/disk0/tim/local_ckpts/` | 本机 NVMe ext4 (**28T** 池) | ~28T 可用 ⭐ | ✓ 持久 |
 
 **为何不放 `/dev/shm` (RAM)**:
 - 重启数据丢失, 训练 ckpt 不能容忍
@@ -120,6 +130,11 @@ ln -sfn "$LOCAL_DIR" "$WORKSPACE_DIR"
 - uc01/uc02 之间有 lsyncd 双向 mirror `/data/shared/` 目录
 - `/home/tim/local_ckpts` 在 `/dev/vda2` 不在 lsyncd scope, 不会被同步 ✓
 - 而 `/home/tim/workspace` 是 symlink → `/data/shared/...` 在 lsyncd 范围, 千万 **不要直接写 ckpt 到** `<kai0>/checkpoints/<config>/<exp>` 真实目录 (旧 bug 多次因此损坏)
+
+**JuiceFS 兼容性 (js01-04)**:
+- js 集群 `/mnt/data` 是 4 台共享 JuiceFS — **不要直接把 ckpt 写到 `/mnt/data/.../kai0/checkpoints/`**, 元数据同步会显著拖慢, 且并发 ckpt 写会破坏 metadata 一致性
+- 一律走 `/home/tim/local_ckpts` symlink → `/DATA/disk0/tim/local_ckpts/` (本机 NVMe), 4 台各机独立, 不跨机同步
+- 训练 launcher 中 `WORKSPACE_DIR` (= `<KAI0_DATA_ROOT>/checkpoints/<config>/<exp>`) 是 `/mnt/data/.../kai0/checkpoints/<config>/<exp>` 上的 symlink, 必须 idempotent 创建
 
 **keep_period 设置**:
 - 100k step 训练: `keep_period=10000` (保留 10 个) 比 `2_000` (保留 50 个) 减少 5× 占用
@@ -185,12 +200,27 @@ deepdive_kai0/
 /vePFS/visrobot01/KAI0/Task_A/base/<date>/  # 原始采集 (跨用户共享)
 ```
 
-#### uc01 / uc02 (独立 4TB ext4)
+#### uc01 / uc02 / uc03 (独立 4TB ext4)
 ```
 /data/shared/dataset/KAI0/Task_<X>/base/         # 自建 (rsync from /vePFS)
 /data/shared/dataset/Kai0_official/Task_A/      # HF 官方 base/dagger/advantage
 ~/workspace/deepdive_kai0/kai0/data/Task_<X>/   # symlinks 指向上述路径
 ```
+
+#### js01-04 (共享 JuiceFS /mnt/data)
+```
+/mnt/data/tim/dataset/KAI0/                      # 4 台共享 (单次 TOS 下载)
+  Task_A/  (1.75M files, 235 GiB)                # base/dagger/<date>-v2 子目录
+  Task_E/  (235K files,   31 GiB)
+  Task_P/  (167K files,   43 GiB)
+  Task_PS/ (201K files,   28 GiB)
+  Task_H/  (7K files,      1 GiB)
+  Task_HP/ (6K files,    0.8 GiB)
+  task_a_mix_b6000_p1200_mixed_1_step49999.tar   # 12 GB init ckpt
+  task_p_v2_aligned_step19999.tar                # 12 GB init ckpt
+~/workspace/deepdive_kai0/kai0/data/Task_<X>/    # symlinks 指向 /mnt/data/tim/dataset/KAI0/Task_<X>
+```
+> ⚠️ 训练 dataloader 直接读 JuiceFS 会有小文件元数据延迟; **强烈建议**先 `cp -rL /mnt/data/tim/dataset/KAI0/<dataset> /dev/shm/<dataset>` (504 GB tmpfs) 再训练。
 
 #### 日期 leaf 命名约定: `YYYY-MM-DD-v2` (2026-05-11 起)
 
@@ -202,14 +232,16 @@ deepdive_kai0/
 
 ### 2.4 临时 / 加速存储 (按机器)
 
-| 路径 | gf0/gf1 | uc01/uc02 |
-|---|---|---|
-| `/dev/shm` (tmpfs RAM) | **1.3 TB** ⭐ 训练数据可加速 | 大 (具体大小待测) |
-| `/tmp` | overlay ~99GB | overlay ~99GB |
-| `/dev/nvme0n1` | (如有, 通常无独立挂载) | `/nix` 3.5TB ext4 NVMe |
-| `/transfer-shanghai` | TOS bucket FUSE 挂载 (跨机文件传输) | 同 |
+| 路径 | gf0/gf1 | uc01/uc02/uc03 | js01-04 |
+|---|---|---|---|
+| `/dev/shm` (tmpfs RAM) | **1.3 TB** ⭐ 训练数据可加速 | 大 (具体大小待测) | **504 GB** ⭐ |
+| `/tmp` | overlay ~99GB | overlay ~99GB | `/dev/sda3` 436G ext4 share |
+| 本机 NVMe | (无独立) | uc03: `/nix` 3.5T NVMe | `/DATA/disk0..3` per host 14–28T |
+| 跨机共享 | `/vePFS` 50T gpfs | (无) | `/mnt/data` 10T JuiceFS:visincept |
+| `/transfer-shanghai` | TOS bucket FUSE 挂载 | 同 | (不挂载, 走 TOS SDK) |
 
 > ⚠️ **gf1 vePFS I/O 约 gf0 慢 2× (实测 video decode)**, 训练时**强烈推荐**先把数据集 cp 到 `/dev/shm` 再训。
+> ⚠️ **js 集群 JuiceFS 小文件元数据延迟显著**, 训练时同样**强烈推荐** `cp -rL` 到 `/dev/shm` 再训。
 
 ---
 
@@ -220,11 +252,18 @@ deepdive_kai0/
 | 机器 | venv 路径 | Python |
 |---|---|---|
 | gf0 | `/vePFS/tim/workspace/deepdive_kai0/kai0/.venv` → `/home/tim/.kai0_venv` (本地 symlink) | 3.11 |
-| gf1 | 同 (但本地 venv 物理独立) | 3.11 |
-| uc01 | `/home/tim/workspace/deepdive_kai0/kai0/.venv` (uv 管理) | 3.12 |
+| ~~gf1~~ | 同 (但本地 venv 物理独立) | 3.11 |
+| uc01 | `/home/tim/workspace/deepdive_kai0/kai0/.venv` (uv 管理, 真实 dir) | 3.12 |
 | uc02 | 同 uc01 (本地独立) | 3.12 |
+| uc03 | 同 uc01 (本地独立) | 3.12 |
+| **js01** | `/mnt/data/tim/workspace/deepdive_kai0/kai0/.venv` → `/DATA/disk0/tim/.kai0_venv` (本地 symlink) | 3.12 |
+| **js02** | 同 (本地 symlink 指向各机 `/DATA/disk0/tim/.kai0_venv`) | 3.12 |
+| **js03** | 同 | 3.12 |
+| **js04** | 同 | 3.12 |
 
-> **注意**: 虽然 gf0/gf1 venv 路径相同 (因 vePFS 共享), 但实际是 `/vePFS/.../kai0/.venv` → `/home/tim/.kai0_venv` 软链, **两机各自指向各自的本地** `/home/tim/.kai0_venv`。所以两机 venv 物理独立, lib 版本可能微差。
+> **注意 (gf 集群)**: 虽然 gf0/gf1 venv 路径相同 (因 vePFS 共享), 但实际是 `/vePFS/.../kai0/.venv` → `/home/tim/.kai0_venv` 软链, **两机各自指向各自的本地** `/home/tim/.kai0_venv`。所以两机 venv 物理独立, lib 版本可能微差。
+>
+> **注意 (js 集群)**: 同理, `/mnt/data/.../kai0/.venv` symlink 是共享 JuiceFS 路径, 但解到 `/DATA/disk0/tim/.kai0_venv` 是 **本机 NVMe**, 4 台各自独立, uv 不能在不同机器上同时 sync 同一目标。新机用 `UV_PROJECT_ENVIRONMENT=/DATA/disk0/tim/.kai0_venv` 明确指定 venv 真实路径绕过 symlink 限制 (见 §14.9 离线安装最佳实践)。
 
 ### 3.2 关键依赖 (各机基本一致)
 
@@ -237,24 +276,31 @@ deepdive_kai0/
 
 ### 3.3 环境变量 (`setup_env.sh` 自动设置)
 
-| 变量 | gf0/gf1 (`profile=gf`) | uc01/uc02 (`profile=default`) |
-|---|---|---|
-| `KAI0_DATA_ROOT` | `/vePFS/tim/workspace/deepdive_kai0/kai0` | `$HOME/workspace/deepdive_kai0/kai0` |
-| `OPENPI_DATA_HOME` | `/vePFS/tim/workspace/openpi_cache` | `$HOME/workspace/openpi_cache` |
-| `PYTORCH_CKPT_BASE` | `/vePFS/tim/workspace/openpi_cache/modelscope_cache/lerobot` | `$HOME/workspace/openpi_cache/modelscope_cache/lerobot` |
-| `XLA_PYTHON_CLIENT_MEM_FRACTION` | 0.9 (set per-launcher) | 同 |
-| `WANDB_MODE` | `offline` (无外网) | `offline` |
-| `LD_LIBRARY_PATH` | 含 `/usr/local/cuda-12.8/...` + `/home/tim/.cuda_compat` | 含 `/usr/local/cuda-12.4/...` |
-| `TORCH_CUDA_ARCH_LIST` | (default) | `"8.0"` (设在 `~/.bashrc`) |
+| 变量 | gf0/gf1 (`profile=gf`) | uc01/02/03 (`profile=default`) | js01-04 (`profile=default`) |
+|---|---|---|---|
+| `KAI0_DATA_ROOT` | `/vePFS/tim/workspace/deepdive_kai0/kai0` | `$HOME/workspace/deepdive_kai0/kai0` | 同 uc (= `/mnt/data/tim/workspace/deepdive_kai0/kai0` via symlink) |
+| `OPENPI_DATA_HOME` | `/vePFS/tim/workspace/openpi_cache` | `$HOME/.cache/openpi` | 同 uc |
+| `PYTORCH_CKPT_BASE` | `/vePFS/tim/workspace/openpi_cache/modelscope_cache/lerobot` | `$HOME/.cache/openpi/modelscope_cache/lerobot` | 同 uc |
+| `XLA_PYTHON_CLIENT_MEM_FRACTION` | 0.9 (set per-launcher) | 同 | 同 |
+| `WANDB_MODE` | `offline` (无外网) | `offline` | `offline` |
+| `LD_LIBRARY_PATH` | 含 `/usr/local/cuda-12.8/...` + `/home/tim/.cuda_compat` | 含 `/usr/local/cuda-12.4/...` | 含 `/usr/local/cuda-12.2/...` (JAX 自带 cuda lib) |
+| `TORCH_CUDA_ARCH_LIST` | (default) | `"8.0"` (设在 `~/.bashrc`) | (default) |
+| `PIP_INDEX_URL` | (default) | (default) | `https://pypi.tuna.tsinghua.edu.cn/simple` |
+| `UV_INDEX_URL` | (default) | (default) | 同 PIP_INDEX_URL |
+| `HF_ENDPOINT` | (default, 反向代理走 sim01) | (default) | `https://hf-mirror.com` (HF 直连不通) |
 
 ### 3.4 已知的机器特定 workaround
 
 | 现象 | 解决 |
 |---|---|
-| **gf1** inline-eval 报 `StreamBeginCaptureToGraph is not implemented for CUDA below version 12.3` | launcher 加 `export XLA_FLAGS="--xla_gpu_enable_command_buffer="` |
+| **gf1 / js01-04** inline-eval 报 `StreamBeginCaptureToGraph is not implemented for CUDA below version 12.3` | launcher 加 `export XLA_FLAGS="--xla_gpu_enable_command_buffer="` (CUDA 12.2 通用 workaround) |
 | **gf1** vePFS 文件 I/O 比 gf0 慢 2× (page cache 不积极) | 训练前先 `cp -rL <data> /dev/shm/<data>`, config repo_id 指向 `/dev/shm/...` |
 | gf0/gf1 共享 vePFS, ckpt 同时写不同 exp_name 不冲突 | 用不同 exp_name 即可并发 |
 | uc01/uc02 HF 下载 429 限流 | 单机优先 + retry, 然后 rsync 到另一机 |
+| **js02/03/04** 内网 IP 无法访问 astral.sh / github releases / hf.co | uv 走 `/mnt/data/tim/bin/uv` symlink, cpython + cache 走 `/mnt/data/tim/uv_share/`, HF 走镜像 (见 §14.9) |
+| **js02/03/04** 无法访问 TOS endpoint (`tos-cn-shanghai.volces.com`) | 数据集只能 js01 单机拉, 其他 3 台通过 `/mnt/data` 共享 FS 自动看到 |
+| **js 集群** uv 拒绝在已是 symlink 的 `.venv` 上 sync (`File exists`) | 用 `UV_PROJECT_ENVIRONMENT=/DATA/disk0/tim/.kai0_venv` 显式指定 venv 真实路径 |
+| **js 集群** JuiceFS 小文件元数据延迟 | 训练前 `cp -rL /mnt/data/tim/dataset/KAI0/<ds> /dev/shm/<ds>` |
 
 ---
 
@@ -265,23 +311,36 @@ deepdive_kai0/
 ```bash
 # gf0 / gf1 (从 sim01 / 任意公网机)
 ssh -p 55555 tim@14.103.44.161   # gf0 (反向隧道经 14.103.44.161 跳板)
-ssh -p 11111 tim@14.103.44.161   # gf1
+ssh -p 11111 tim@14.103.44.161   # gf1 (已下线)
 
-# uc01 / uc02 (直连)
+# uc01 / uc02 / uc03 (直连)
 sshpass -p tim ssh tim@117.50.196.104   # uc01
 sshpass -p tim ssh tim@106.75.68.254    # uc02
+sshpass -p tim ssh tim@117.50.217.231   # uc03
+
+# js01 公网直连; js02/03/04 经 js01 ProxyJump
+sshpass -p tim ssh tim@120.92.149.234                              # js01
+sshpass -p tim ssh -J root@120.92.149.234 tim@10.0.1.105            # js02
+sshpass -p tim ssh -J root@120.92.149.234 tim@10.0.1.20             # js03
+sshpass -p tim ssh -J root@120.92.149.234 tim@10.0.1.91             # js04
 
 # 也可在 ~/.bashrc 设别名:
 alias uc01='sshpass -p "tim" ssh -o StrictHostKeyChecking=no tim@117.50.196.104'
 alias uc02='sshpass -p "tim" ssh -o StrictHostKeyChecking=no tim@106.75.68.254'
+alias uc03='sshpass -p "tim" ssh -o StrictHostKeyChecking=no tim@117.50.217.231'
+alias js01='sshpass -p "tim" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tim@120.92.149.234'
+alias js02='sshpass -p "tim" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -J root@120.92.149.234 tim@10.0.1.105'
+alias js03='sshpass -p "tim" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -J root@120.92.149.234 tim@10.0.1.20'
+alias js04='sshpass -p "tim" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -J root@120.92.149.234 tim@10.0.1.91'
 ```
 
 ### 4.2 用户
 
-- 用户名: `tim` (全部 4 台一致)
-- 密码: `tim` (uc01/uc02 sudo 也是 `tim`, no NOPASSWD)
+- 用户名: `tim` (全部 8 台一致)
+- 密码: `tim` (uc + js sudo 也是 `tim`, 有密码 sudo)
 - gf0/gf1: 通过反向隧道, 无需密码 (key-based)
-- uc01/uc02: 用 `sshpass -p tim` 或配置 SSH key
+- uc01/02/03: 用 `sshpass -p tim` 或配置 SSH key
+- js01-04: 本机公钥 (`~/.ssh/id_rsa.pub`) 已植入 4 台 `~tim/.ssh/authorized_keys`; 4 台之间 ed25519 互信
 
 ### 4.3 TOS 跨机传输 (gf 集群 ↔ sim01 ↔ uc01/uc02)
 
@@ -344,19 +403,21 @@ cd <KAI0_DATA_ROOT>
 - `--resume` (推荐): 从 `<KAI0_DATA_ROOT>/checkpoints/<config>/<exp_name>/` 找最大 step 的 ckpt resume; 若无 ckpt, fallback 到 `weight_loader` 指定的 init params 冷启
 - ⚠️ **永远不要用 `--overwrite`**: 该 flag rmtree 整个 exp 目录, 导致**所有 ckpt 不可逆丢失** (历史教训: 2026-04-24 误用导致 5k ckpts 全失)
 
-### 5.4 数据集放本地加速 (gf1 强烈推荐)
+### 5.4 数据集放本地加速 (gf1 / js 集群强烈推荐)
 
 ```bash
 # Stop training first if running
 # Copy to /dev/shm (tmpfs, ~3 GB/s read)
 mkdir -p /dev/shm/<dataset>
-cp -rL /vePFS/.../<dataset> /dev/shm/
+cp -rL /vePFS/.../<dataset> /dev/shm/           # gf0/gf1
+cp -rL /mnt/data/tim/dataset/KAI0/<dataset> /dev/shm/   # js01-04
 
 # Edit config.py: change repo_id to /dev/shm/<dataset>/base
 # Restart training
 ```
 
 **实测 gf1 v3 用 /dev/shm 后**: 步速 5.5 → 3.16 s/step (1.74× 加速), GPU util 80% idle → 100% busy。
+**js 集群预期同样级别加速** (JuiceFS 元数据延迟与 vePFS 类似), 待具体训练实测。
 
 ### 5.5 自动打包 best ckpt (训练 END 后)
 
@@ -382,7 +443,7 @@ disown $!
 
 直接读写 `/vePFS/...` 路径, 共享 GPFS。一边写另一边立即可见。
 
-### 6.2 gf 集群 ↔ uc01/uc02
+### 6.2 gf 集群 ↔ uc01/uc02/uc03
 
 | 方法 | 适用 | 命令 |
 |---|---|---|
@@ -403,6 +464,36 @@ cd /data1/DATA_IMP/KAI0/ckpt_downloads/<name>
 .venv/bin/python ~/workspace/deepdive_kai0/web/data_manager/backend/tools/from_tos_file.py <name>.tar
 tar -xf <name>.tar
 ```
+
+### 6.4 js 集群内部 (4 台共享 /mnt/data, 不需同步)
+
+JuiceFS 共享, 任一 js 上写 `/mnt/data/tim/...` 其他 3 台立即可见。代码 (`~/workspace`)、数据集 (`/mnt/data/tim/dataset/`) 都走共享 FS, **不需要任何手工 sync**。
+
+> 唯一例外: `.venv/` 在每台本机 `/DATA/disk0`, 不共享; ckpt (`/home/tim/local_ckpts → /DATA/disk0/...`) 同。
+
+### 6.5 gf / uc 集群 ↔ js 集群
+
+| 方法 | 适用 | 命令 / 注意 |
+|---|---|---|
+| **TOS** ⭐ | 数据集 + ckpt | 唯一通用通道; js01 公网直连 TOS, **js02/03/04 必须通过 js01** (内网无法直达 TOS endpoint) |
+| **rsync via 公网** | 中小文件 | 走 `tim@<其他机器公网>` 路径; 如 `rsync gf0:<path> js01:/mnt/data/tim/dataset/...` |
+| **不可用** | sim01:29290 反向代理 | js 集群不在同一 VPC, 无法借用 |
+
+**示例 — TOS → js 集群下载** (代码在 `train_scripts/data/from_tos_recursive.py`, 含硬编码 read-only AK/SK):
+```bash
+ssh js01
+cd ~/workspace/deepdive_kai0/kai0
+nohup .venv/bin/python ../train_scripts/data/from_tos_recursive.py \
+    --prefix KAI0/<TaskName>/ \
+    --dest /mnt/data/tim/dataset/KAI0/<TaskName> \
+    --concurrency 32 --skip-existing \
+    > /tmp/tos_pull.log 2>&1 &
+disown $!
+# 实测 ~12 MB/s, 单进程 32 并发是 TOS API 速率甜区
+```
+
+> ⚠️ **--dest 必须包含目标 TaskName 路径** (脚本会从 key 中剥离 `--prefix`)，否则文件落在错位置。
+> ⚠️ **多进程并行不同 prefix 会触发 TOS list_objects 限速**，已知不可行。
 
 ---
 
@@ -442,9 +533,15 @@ kill -SIGKILL <pid>
 nvidia-smi --query-gpu=memory.used --format=csv,noheader
 ```
 
-### 7.4 Locale warning (uc01/uc02)
+### 7.4 Locale warning (uc01/uc02 / js01-04)
 
 每次 SSH 都会 `setlocale: LC_ALL: cannot change locale (zh_CN.UTF-8)`. 无功能影响, 可加 `export LC_ALL=C.UTF-8` 到 `~/.bashrc`。
+
+### 7.5 JuiceFS 元数据延迟 (js 集群)
+
+- `find` / `du -sh` 在 2M+ 小文件时极慢, 别用做 sanity check
+- `du -sh /mnt/data/tim/dataset/KAI0/` 报告的字节数比真实大 ~3-5×, 这是 JuiceFS 块占用 quirk (与对象后端碎片有关); 真实大小用 `find ... -exec stat -c %s {} + | awk '{s+=$1} END {print s}'`
+- 训练时**不要**直接读 `/mnt/data` (元数据查询慢), 走 `/dev/shm` cache
 
 ---
 
@@ -468,9 +565,14 @@ ckpt_path:        ${KAI0_DATA_ROOT}/checkpoints/<config>/<exp_name>/<step>/
 | 机器 | 主用途 | 典型负载 |
 |---|---|---|
 | **gf0** | Task_A 全参 fine-tune (主战) | 50k step 长训, vePFS 数据 |
-| **gf1** | Task_A 全参 fine-tune (副战) | 同 gf0, 但需 /dev/shm 加速 |
-| **uc01** | (待用) Advantage Estimator / AWBC 训练 | 数据本地, 无 vePFS 拥挤问题 |
-| **uc02** | (待用) uc01 副本 / 并行实验 | 同 uc01 |
+| ~~gf1~~ | 已退役 (2026-05-06) | — |
+| **uc01** | Advantage Estimator / AWBC 训练 + 3-host HSDP/FSDP (§13) | 数据本地, 24 GPU 集群训练 |
+| **uc02** | 同 uc01 (3-host 集群成员) | 同 |
+| **uc03** | 同 uc01 (3-host 集群成员, 原 gf4) | 同 |
+| **js01** | (待用) Task_A 全参 fine-tune / 数据预处理入口 (公网 IP) | 单机 8 GPU; TOS 拉数据中转点 |
+| **js02** | (待用) 与 js01 并行 / 多机训练成员 | 同 js01, 仅内网 |
+| **js03** | (待用) 重训练 (28T NVMe ⭐) | 同 js01, **28T 本机盘** 适合大量 ckpt |
+| **js04** | (待用) 重训练 (28T NVMe ⭐) | 同 js03 |
 
 ---
 
@@ -502,6 +604,9 @@ serve_policy.py 启动推理服务
 | 同上 | gf1 | 5.5 | vePFS 数据冷, dataloader bound |
 | 同上, data on /dev/shm | gf1 | **3.16** | 修复后, GPU 100% util |
 | 同上 | uc01/uc02 | (待测) | 期望 ~2-3 s/step |
+| pi05 全参 fine-tune, batch=128, fsdp=24, HSDP 3-host | uc01+02+03 | (见 §13) | NCCL+IB+GDR ~800 Gbps |
+| pi05 全参 fine-tune, batch=128, fsdp=8 | js01-04 | (待测) | 期望 ~2-3 s/step (A800 同 uc), JuiceFS 元数据走 /dev/shm |
+| TOS 数据集下载 | js01 | — | ~12 MB/s, 单进程 32 并发 (受 TOS API 延迟限) |
 
 inline-eval 时间 (200 frames 采样):
 - 17 val ep: 660s
@@ -516,6 +621,7 @@ inline-eval 时间 (200 frames 采样):
 
 | 日期 | 内容 |
 |---|---|
+| 2026-05-13 | §2/§3/§4/§5/§6/§7/§9/§11 全部扩展加入 js 集群行 (8 台覆盖); §6.4/§6.5 新增 js 内部 + 跨集群同步; §7.5 新增 JuiceFS 元数据延迟坑 |
 | 2026-05-12 | 添加 §14: js01-04 集群 (A800×8 ×4, JuiceFS 共享, IB, CUDA 12.2, 部署 + 数据同步全记录); §1 全景表扩到 8 台 |
 | 2026-05-12 | 添加 section 13: 3-host HSDP/FSDP 集群训练 + RDMA + GDR + NCCL 配置 + 坑 |
 | 2026-05-02 | 初版: 整合 gf0/gf1/uc01/uc02, 含 v3 /dev/shm 加速实测 |
