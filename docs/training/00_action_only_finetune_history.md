@@ -12,7 +12,7 @@
 > - **`task_a_visrobot01_mixed_600.md`** — Task A 全参数微调系列 (mixed_gf0_173 / visrobot01_only / mix_vis600 / pure_vis600)
 > - **`norm_stats_ablation_apr28_450.md`** — norm_stats 消融实验 (new_norm vs inherit_norm, head-to-head 同 dataset 同 hparams)
 > - **`task_a_pure_1200_new_norm_results.md`** — pure_1200 系列两个实验 (-new 限定 vs 全日期, mixed_1 init + 50k)
-> - **`task_a_mix_b6000_p1200_mixed_1_results.md`** — uc01 实验1 大数据混合训练 (~7200 ep mix, mixed_1 init, 50k 步, best 0.0108)
+> - **`task_a_new_mixed_pure2_1800_6000_results.md`** — uc 集群大规模混合训练合并文档 ⭐ **SOTA 0.0085** (A: 7900 ep pi05_base init / B: 7200 ep mixed_1 init=0.0108)
 > - **`task_p_unfreeze_20k_v2_results.md`** — uc02 v2 数据集对比 (Task_P/v2_aligned 84 ep + action=state + 30fps interp + seed=123, best 0.0070, -64% vs orig)
 > - `kai0_mixed_1_results.md` — Task A 迁移 init 来源
 > - `training_plans.md` — kai0_mixed_1 / kai0_full 训练 recipe
@@ -62,6 +62,7 @@
 | Task A | visrobot01_only_2k_gf0 ⚡ | Task A | visrobot01-only 193+17 | 2k | 1999 | 0.0202 | 0.0411 | 0.0680 | 0.1017 |
 | Task A | **task_a_new_pure_1200_new_norm** 🔥⏳ | Task A | A_new_pure_1200 (1143 train, 仅 6 个 -new 日期, mixed_1 init) | 50k | 32000* | **0.0105*** | 0.0231 | 0.0386 | 0.0582 |
 | Task A | **mix_b6000_p1200_init_mixed_1** 🔥 | Task A | mix_b6000_p1200 (~7200 ep, base 6000 + pure 1200) + mixed_1 init | 50k | 44000 | **0.0108** | 0.0252 | 0.0457 | 0.0728 |
+| Task A | **task_a_new_pure2_1800_6000_new_norm** 🏆🔥 | Task A | **A_new_pure2_1800_6000 (7900 ep: 1790 v2-mirror + 3055 base + 3055 advantage)** + **pi05_base** init, 24-GPU uc cluster | 50k | **49999** | **0.0085** ⭐ | **0.0168** | **0.0254** | **0.0337** |
 | Task A | **task_a_pure_1200_new_norm** ⚡ | Task A | A_pure_1200 (1142 train, 全 8 日期 + -new, mixed_1 init) | 50k | 49999 | **0.0145** | 0.0255 | 0.0384 | 0.0539 |
 
 ¹ E3 (combo) 在 step ~8k 因 GPU 1 NUMA SIGSEGV 中断，best 在 step 12000 之前；step 10000=0.0284, step 12000=0.0277。
@@ -74,6 +75,14 @@
 **norm_stats 消融 (mix_apr28_450 同 dataset 头对头, ✅ 全部完成 2026-04-30)**: 两组 final plateau 后 — **new_norm 0.0127 vs inherit_norm 0.0140 (-9.3%)**。head-to-head gap 从早期 16% 缩到 final-plateau 9.3%, 不会完全闭合。@1/@10/@25/@50 horizon-dependent gap: 9.3%/3.7%/1.1%/0.4% (norm 主要影响**单步精度**, 对 chunk planning 影响小)。**冷启必须重算 norm_stats**。详见 `norm_stats_ablation_apr28_450.md`。
 
 **pure_1200 系列 (mixed_1 init + new_norm + 50k, 2026-05-03)**: 头对头数据源对比 — **`-new` 限定 6 日期 (1143 train) 大幅领先全 8 日期 (1142 train)** — same hparams 下 new_pure_1200 在 step 32k 达 **MAE@1=0.0105**, 比 pure_1200 同步数 0.0154 低 **31.8%**。`-new` 日期是最新高质量采集, 早期日期数据可能含更多采集噪声。完整曲线见 `task_a_pure_1200_new_norm_results.md`。
+
+**新 SOTA: task_a_new_pure2_1800_6000_new_norm (uc 集群 24 GPU, pi05_base init, 50k, 2026-05-13)**: 数据规模 + 干净起点协同 — **A_new_pure2_1800_6000 (7900 ep = 1790 mirror-增强 + 3055 kai0_base + 3055 kai0_advantage)** + **pi05_base** init, step 49999 达 **MAE@1=0.0085**, 比之前 best (new_pure_1200=0.0105) 低 **19.0%**, 比 mix_b6000_p1200 (0.0108) 低 **21.3%**。**关键洞察**:
+1. pi05_base 起点 MAE=0.0534 (vs mixed_1 起点 0.0161, 高 3.3x), 但**最终精度反而低 21%** — pi05_base 干净起点天花板更高
+2. **数据规模 + 干净起点 > 数据质量单一维度**: 推翻 B 实验 (mix_b6000_p1200) "数据质量 > 数据量" 的结论
+3. long-horizon (@50) 显著改善 (0.0337 vs B 0.0728, **-54%**) — chunk planner 受益于干净起点
+4. 集群训练: HSDP `[3,8]` SPMD partitioner 105+ 分钟死锁 → 切到全 FSDP `[1,24]` 8 分钟编译成功 (详见 `docs/deployment/training_servers_knowledge_base.md` Section 13)
+
+完整曲线 + B 对照见 `task_a_new_mixed_pure2_1800_6000_results.md`。
 
 **核心修正**（vs 上一版）：
 1. **真正的 Task E 最佳是 t10_allgood_25k = 0.0233**，不是 E2 的 0.0262。允许更长训练 + "allgood" 增广数据后，性能再下一台阶（-12%）。
