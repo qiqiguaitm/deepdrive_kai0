@@ -9,8 +9,9 @@
 **实测速度**: 135 MB/s (cron `pull_tos_to_shared.sh` 已禁用避免抢带宽)
 **TOS 验证**:
 - `datasets/A_new_pure_200/`: **815 objects, 3.14 GB** ✓
+- `datasets/A_new_pure_200_val/`: **94 objects, 262.74 MB** ✓ (补传 2026-05-16 19:23 CST)
 - `ckpts/pi05init_step_4000/`: **104 objects, 41.67 GB** ✓
-- 总计: **919 objects, 44.81 GB**
+- 总计: **1013 objects, 45.07 GB**
 
 ---
 
@@ -20,6 +21,7 @@
 |---|---|---|---|---|---|
 | 1 | **uc01 pi05init ckpt step 4000** | 42 GB | `tos://transfer-shanghai/backup_uc_reinstall_20260516/ckpts/pi05init_step_4000/` | `uc01:/home/tim/local_ckpts/checkpoints/pi05_flatten_fold_a_new_pure_200_js/task_a_pure200_new_norm_base_pi0.5/4000/` | **resume 训练 (paused at step 4330)** |
 | 2 | **A_new_pure_200 dataset** | 3.2 GB | `tos://transfer-shanghai/backup_uc_reinstall_20260516/datasets/A_new_pure_200/` | `uc01:/home/tim/local_ckpts/data/Task_A/self_built/A_new_pure_200/` | resume 训练必需的数据 |
+| 3 | **A_new_pure_200_val** (inline_eval) | 263 MB | `tos://transfer-shanghai/backup_uc_reinstall_20260516/datasets/A_new_pure_200_val/` | `uc01:/home/tim/local_ckpts/data/Task_A/self_built/A_new_pure_200_val/` | inline_eval 必需 |
 
 ---
 
@@ -174,7 +176,7 @@ ps -ef | grep tosutil | grep -v grep   # 应该为空
 
 | 项 | 大小 | 重新获取方式 |
 |---|---|---|
-| **`A_new_pure_200_val` (验证集)** | ~263MB | 用 build script 重建, 或从其他 uc/js 节点拷贝 |
+| ~~`A_new_pure_200_val` (验证集)~~ | ~~263MB~~ | ✅ 已补传 (见 §1 #3) |
 | pi05_base init | 12 GB | HuggingFace 下载 (`openpi-assets/pi05_base`) |
 | mixed_1 init | 22 GB | 已废弃 (本次实验用 pi05_base init) |
 | deepdive_kai0 代码 | (变化) | git clone from GitHub |
