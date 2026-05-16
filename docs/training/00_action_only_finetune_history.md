@@ -2,7 +2,7 @@
 
 > **作用**：集成本机所有训练实验的历史记录与结果，**含每步 inline-eval MAE@{1,10,25,50} 完整曲线**。涵盖训练类型: action-only freeze、全参数解冻 (full-finetune)、LoRA (r=16/32)、AWBC、cold-start 混合数据训练 (mix_vis600 / pure_vis600 / mixed_visrobot01) 等。
 > **范围**：Task E（扶起倒箱）+ Task P（抓放盒子）+ Task A（FlattenFold） — 三个任务下的所有 train run, 每条 run 的 best step / best MAE / 数据规模 / freeze 策略 / LoRA r 都在此聚合; 详细超参 / 数据配方移到下方 "关联详细文档" 列表的对应专题文件。
-> **最近更新**：2026-05-15 03:22 CST (js02 `task_a_new_pure_200_new_norm` resume 22k→49999 完成: MAE@1=**0.0065** ⭐⭐ **全任务 NEW SOTA**, 比老 SOTA `pure2_1800_6000` 0.0085 低 **24%**; 同时 js03+04 16-GPU `task_a_new_pure2_1800_new_norm_js` 完成: MAE@1=0.0090, 未超老 SOTA. **200 ep 精选 + mixed_1_clean init 完胜 7900 ep 大杂烩 + pi05_base init** — 数据质量 + 精选 > 数据规模. 详见 `task_a_new_pure_200_new_norm_results.md` 和 `task_a_new_pure2_1800_new_norm_js_results.md`)
+> **最近更新**：2026-05-16 18:10 CST (uc02 `task_a_new_pure_1800_new_norm_base_mixed1` 完成: MAE@1=**0.0088**, 全 long-horizon (@10/@25/@50) 胜老 SOTA 9-23%, **首次验证两阶段 (mixed_1+1800ep) 范式在 chunk planner 上的优势**; uc03 `task_a_new_smooth_800_new_norm` 完成: MAE@1=0.0089. 训练期间 uc 集群三节点遭 Ravencoin 挖矿木马入侵, 已完整处置并写事件报告 `docs/security/2026-05-16_rvn_miner_incident.md`. 范式对比文档见 `training_paradigm_comparison.md`)
 > **数据来源**：`logs/train_*.log` 中 `[inline-eval] step=N MAE@1=… @10=… @25=… @50=…` 行（9 val ep × 20 frames，~30s/eval），与 `logs/eval_history_v2/v2_step_*.json` 离线归档（9 val ep × 50 queries）。
 > **命名前缀 `00_` 用于按文件名排序时置顶。**
 >
@@ -15,6 +15,10 @@
 > - **`task_a_new_mixed_pure2_1800_6000_results.md`** — uc 集群大规模混合训练合并文档 (老 SOTA 0.0085, A: 7900 ep pi05_base init / B: 7200 ep mixed_1 init=0.0108)
 > - **`task_a_new_pure_200_new_norm_results.md`** ⭐⭐ — **NEW SOTA 0.0065** (js02 单机 8 GPU, 200 ep `-new` 精选 + mixed_1_clean init, resume 22k→49999, -24% vs 老 SOTA)
 > - **`task_a_new_pure2_1800_new_norm_js_results.md`** — 1800 ep `-new` + mixed_1_clean init, js03+04 16-GPU HSDP, MAE 0.0090 (未超老 SOTA, +5.9%)
+> - **`task_a_new_pure_1800_new_norm_base_mixed1_results.md`** — uc02 单机 8 GPU, 1800 ep + **mixed_1** init, MAE@1=0.0088, **@50=0.0258 全 long-horizon 胜老 SOTA 9-23%** (两阶段范式)
+> - **`task_a_new_smooth_800_new_norm_results.md`** — uc03 单机, 811 ep vis_clean_v2 + mixed_1_clean init, MAE@1=0.0089, 但 @50=0.0636 long-horizon 差 (无 mirror augmentation)
+> - **`training_paradigm_comparison.md`** — single-stage vs two-stage 训练范式对比 (pi05_base+7900ep 一次性 vs mixed_1+1800ep 两阶段, 决策树)
+> - **`docs/security/2026-05-16_rvn_miner_incident.md`** — Ravencoin 挖矿木马入侵事件报告 (uc01/02/03, SSH 密码爆破 + 横向移动, 已处置)
 > - **`task_p_unfreeze_20k_v2_results.md`** — uc02 v2 数据集对比 (Task_P/v2_aligned 84 ep + action=state + 30fps interp + seed=123, best 0.0070, -64% vs orig)
 > - `kai0_mixed_1_results.md` — Task A 迁移 init 来源
 > - `training_plans.md` — kai0_mixed_1 / kai0_full 训练 recipe
@@ -68,6 +72,8 @@
 | Task A | **task_a_pure_1200_new_norm** ⚡ | Task A | A_pure_1200 (1142 train, 全 8 日期 + -new, mixed_1 init) | 50k | 49999 | **0.0145** | 0.0255 | 0.0384 | 0.0539 |
 | Task A | **task_a_new_pure2_1800_new_norm_js** 🔥 | Task A | A_new_pure2_1800 (1800 ep `-new`) + **mixed_1_clean** init, js03+04 16-GPU HSDP `[2,8]`, batch=80 | 50k | **49999** | **0.0090** | **0.0175** | **0.0247** | **0.0328** |
 | Task A | **task_a_new_pure_200_new_norm** 🏆⭐⭐ NEW SOTA | Task A | **A_new_pure_200 (200 ep `-new` 精选)** + **mixed_1_clean** init, js02 单机 8 GPU, batch=120, **resume 22k→49999** | 50k | **49999** | **0.0065** ⭐ | **0.0072** | **0.0075** | **0.0079** |
+| Task A | **task_a_new_pure_1800_new_norm_base_mixed1** 🔥 (两阶段) | Task A | A_new_pure2_1800 (1800 ep `-new` + mirror) + **mixed_1** init (= pi05_base + 6000 ep stage 1), uc02 单机 8 GPU, batch=128 | 50k | **49999** | **0.0088** | **0.0153** | **0.0203** | **0.0258** |
+| Task A | **task_a_new_smooth_800_new_norm** 🔥 (vis_clean) | Task A | A_new_smooth_800 (**811 ep vis_base_clean_v2 + X1 cleanup**, no mirror) + mixed_1_clean init, uc03 单机 8 GPU, batch=128 | 50k | **49999** | **0.0089** | 0.0221 | 0.0404 | 0.0636 |
 
 ¹ E3 (combo) 在 step ~8k 因 GPU 1 NUMA SIGSEGV 中断，best 在 step 12000 之前；step 10000=0.0284, step 12000=0.0277。
 ² v2 训练超过 nominal 15k 步，step 16000 实测最佳 (0.0382)；master plan 中 0.0411@14000 是 canonical 数。
@@ -87,6 +93,22 @@
 4. **同 init (mixed_1_clean), 1800 ep 反而比 200 ep 差 +38.5%**: 见 `task_a_new_pure2_1800_new_norm_js` (0.0090) — 加 same-distribution 数据反稀释信号
 
 完整曲线见 `task_a_new_pure_200_new_norm_results.md`。
+
+---
+
+**🆕 范式对比 (single-stage vs two-stage, 2026-05-16)**: uc02 `task_a_new_pure_1800_new_norm_base_mixed1` (mixed_1 init + 1800 ep 两阶段) 完成 — **MAE@1=0.0088** (vs 老 SOTA pi05_base+7900ep 一阶段 0.0085, +3.5%), 但**全 long-horizon 显著胜出**:
+- @10: 0.0153 vs SOTA 0.0168 (**-8.9%**)
+- @25: 0.0203 vs SOTA 0.0254 (**-20.1%**)
+- @50: **0.0258 vs SOTA 0.0337 (-23.4%)**
+
+**关键洞察**:
+1. **两阶段 (mixed_1 中转)** 在 long-horizon 上**反超一阶段 SOTA** — Stage 1 (6000 ep) 给 chunk planner 稳定 low-level 表示, Stage 2 (1800 ep) 精修
+2. **训练成本仅一阶段的 ~30%** (Stage 2 8 GPU 26h vs 一阶段 24 GPU 24h), 且 mixed_1 可复用多次摊薄 Stage 1 成本
+3. 单步精度 (@1) 一阶段略胜 (3.5%), 但部署侧重长程时两阶段更优
+
+uc03 同期 `task_a_new_smooth_800_new_norm` (vis_clean 811 ep + mixed_1_clean init, **no mirror**): MAE@1=0.0089 接近 1800 ep 同 init, 但 **@50=0.0636 远差**, 证明 long-horizon 需要 (数据规模 OR mirror augmentation)。
+
+详细对比 + 决策树见 `training_paradigm_comparison.md`。详细 per-exp 见 `task_a_new_pure_1800_new_norm_base_mixed1_results.md` 和 `task_a_new_smooth_800_new_norm_results.md`。
 
 ---
 
