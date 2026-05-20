@@ -1,0 +1,63 @@
+{
+  "groups": [
+    {
+      "id": "deployment",
+      "name_zh": "部署与硬件",
+      "name_en": "Deployment & Hardware",
+      "docs": [
+        { "file": "sim01_deployment.md",                 "title_zh": "sim01 部署文档",                    "title_en": "sim01 deployment guide" },
+        { "file": "usb_camera_layout.md",                "title_zh": "USB 相机拓扑",                      "title_en": "USB camera topology" },
+        { "file": "realsense_anti_flicker_2026-04-27.md","title_zh": "RealSense 抗闪烁",                  "title_en": "RealSense anti-flicker" },
+        { "file": "ipc_inference_deployment_review.md",  "title_zh": "IPC 部署 review",                   "title_en": "IPC deployment review" },
+        { "file": "task_a_master_plan.md",               "title_zh": "Task A 主规划",                     "title_en": "Task A master plan" }
+      ]
+    },
+    {
+      "id": "inference",
+      "name_zh": "推理与可视化",
+      "name_en": "Inference & Visualization",
+      "docs": [
+        { "file": "multimodal_inference_protocol.md",     "title_zh": "多模态推理协议",                "title_en": "Multimodal inference protocol" },
+        { "file": "rtc_implementation.md",                "title_zh": "RTC 实现",                      "title_en": "RTC implementation" },
+        { "file": "inference_visualization.md",           "title_zh": "Rerun 推理可视化",              "title_en": "Rerun inference visualization" },
+        { "file": "inference_visualization_mesh.md",      "title_zh": "Mesh 化场景升级",               "title_en": "Mesh scene upgrade" },
+        { "file": "rerun_mesh_transparency_lesson.md",    "title_zh": "Mesh 透明度调试笔记",           "title_en": "Mesh transparency lesson" },
+        { "file": "pi05_inference_backend_benchmark_plan.md", "title_zh": "PyTorch 后端 benchmark",   "title_en": "PyTorch backend benchmark" },
+        { "file": "realtime_vla_optimization_analysis.md","title_zh": "实时 VLA 优化分析",            "title_en": "Real-time VLA optimization" },
+        { "file": "ros2_image_inference_validation_review.md", "title_zh": "ROS2 图像推理校验",      "title_en": "ROS2 image inference validation" },
+        { "file": "official_diff_and_risk_analysis.md",   "title_zh": "官方 diff 与风险分析",          "title_en": "Official diff & risk analysis" }
+      ]
+    },
+    {
+      "id": "data",
+      "name_zh": "数据与采集",
+      "name_en": "Data & Collection",
+      "docs": [
+        { "file": "teleoperation_guide.md",  "title_zh": "遥操作 + DAgger 指南",  "title_en": "Teleop + DAgger guide" },
+        { "file": "data_manager_plan.md",    "title_zh": "数据采集 UI 规划",       "title_en": "Data manager UI plan" },
+        { "file": "build_web_venv.md",       "title_zh": "采集后端 venv 构建",     "title_en": "Collection backend venv" },
+        { "file": "replay_and_stacks_usage.md","title_zh": "Replay 与三栈使用",   "title_en": "Replay & stack usage" },
+        { "file": "tos_access_guide.md",     "title_zh": "TOS 访问指南",          "title_en": "TOS access guide" }
+      ]
+    },
+    {
+      "id": "training",
+      "name_zh": "训练与模型",
+      "name_en": "Training & Models",
+      "docs": [
+        { "file": "training_servers_knowledge_base.md", "title_zh": "训练服务器知识库",     "title_en": "Training servers KB" },
+        { "file": "js_servers_probe.md",                "title_zh": "js 服务器接入调研",    "title_en": "js servers probe" },
+        { "file": "checkpoints_layout.md",              "title_zh": "Checkpoint 落盘规范",  "title_en": "Checkpoint layout spec" },
+        { "file": "analysis_kai0_xvla.md",              "title_zh": "kai0 vs X-VLA 分析",   "title_en": "kai0 vs X-VLA analysis" }
+      ]
+    },
+    {
+      "id": "debug",
+      "name_zh": "调试日志",
+      "name_en": "Debug Logs",
+      "docs": [
+        { "file": "task_a_real_robot_grasp_corner_debug_log.md", "title_zh": "Task A 真机抓角调试", "title_en": "Task A grasp-corner debug" }
+      ]
+    }
+  ]
+}

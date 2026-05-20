@@ -1,0 +1,100 @@
+{
+  "milestones": [
+    {
+      "date": "2026-03-27",
+      "category": "inference",
+      "title_zh": "kai0 & X-VLA 深度分析报告",
+      "title_en": "kai0 & X-VLA deep analysis report",
+      "summary_zh": "完成 kai0 与 X-VLA 两套框架的论文/数据/代码全面对比，确定以 kai0 (π0.5) 作为复现主线。",
+      "summary_en": "Completed a side-by-side analysis of kai0 vs X-VLA across paper, data, and code, selecting kai0 (π0.5) as the reproduction baseline."
+    },
+    {
+      "date": "2026-03-28",
+      "category": "hardware",
+      "title_zh": "sim01 一体机部署上线",
+      "title_en": "sim01 deployment workstation online",
+      "summary_zh": "Ubuntu 24.04 + 双 RTX 5090 一体机统一 venv 跑通 JAX 推理 + ROS2 + CAN + 三相机，稳态推理 66 ms。",
+      "summary_en": "Brought up the dual-RTX-5090 workstation with a unified venv hosting JAX inference, ROS2, CAN, and three cameras, hitting 66 ms steady-state inference."
+    },
+    {
+      "date": "2026-03-29",
+      "category": "inference",
+      "title_zh": "IPC 部署 review + 图像管线对齐",
+      "title_en": "Deployment review + image pipeline parity",
+      "summary_zh": "完成 ROS2 移植版与 ROS1 原版逐行 diff，锁定相机 topic 与 Piper mode P0 修复项，确认核心算法零差异。",
+      "summary_en": "Line-by-line diff of the ROS2 port vs the ROS1 upstream identified two P0 deployment fixes (camera topic, Piper mode) while confirming zero algorithmic divergence."
+    },
+    {
+      "date": "2026-04-04",
+      "category": "inference",
+      "title_zh": "Rerun 3D 可视化与执行控制",
+      "title_en": "Rerun 3D viz + execute toggle",
+      "summary_zh": "上线带 FK mesh、预测轨迹、关节时序的 3D 场景，引入键盘/topic 双通道 OBSERVE↔EXECUTE 切换。",
+      "summary_en": "Shipped a 3D scene with FK meshes, predicted EE trails, and joint timeseries, plus a keyboard/topic OBSERVE↔EXECUTE toggle."
+    },
+    {
+      "date": "2026-04-25",
+      "category": "tooling",
+      "title_zh": "项目完整指南 v1.0",
+      "title_en": "Project complete guide v1.0",
+      "summary_zh": "汇总硬件拓扑、数据流水线、训练系统、checkpoint 传输、部署、监测的全景指南文档落地。",
+      "summary_en": "Published v1.0 of the end-to-end guide covering hardware topology, data pipeline, training, checkpoint transfer, deployment, and monitoring."
+    },
+    {
+      "date": "2026-04-27",
+      "category": "hardware",
+      "title_zh": "RealSense 抗闪烁 + ckpt 单点落盘规范",
+      "title_en": "RealSense anti-flicker + single-source ckpt layout",
+      "summary_zh": "D435 PLF=50 Hz + D405 锁 20 ms 曝光消除闪烁；ckpt 统一落到本地 NVMe 单点，checklist 杜绝 norm_stats 错配。",
+      "summary_en": "D435 PLF=50 Hz + D405 fixed 20 ms exposure removed visible flicker; checkpoints consolidated under a single NVMe root with a checklist to prevent norm_stats mismatch."
+    },
+    {
+      "date": "2026-04-30",
+      "category": "tooling",
+      "title_zh": "Slim Replay 三栈互斥上线",
+      "title_en": "Slim replay stack with 3-way mutex",
+      "summary_zh": "autonomy / replay-only / data_collect 三栈通过 marker 互斥，replay-only 启动 1 s 内存 50 MB，Web/CLI/curl 三入口。",
+      "summary_en": "Launched the three-way mutex (autonomy / replay-only / data_collect) with a 1 s, 50 MB slim replay stack and three trigger entrypoints."
+    },
+    {
+      "date": "2026-05-12",
+      "category": "training",
+      "title_zh": "js 训练集群接入 (A800 × 4)",
+      "title_en": "js training cluster onboarded (A800 × 4)",
+      "summary_zh": "4 台 A800-80GB × 8 服务器接入，JuiceFS 共享 + 200 Gb/s InfiniBand，扩到 8 训练节点。",
+      "summary_en": "Onboarded four A800-80GB × 8 nodes with shared JuiceFS and 200 Gb/s InfiniBand, expanding the fleet to eight training nodes."
+    },
+    {
+      "date": "2026-05-18",
+      "category": "inference",
+      "title_zh": "多模态推理协议 (深度 + EE pose)",
+      "title_en": "Multimodal inference protocol (depth + EE pose)",
+      "summary_zh": "WebSocket 协议扩展支持深度输入、双臂 EE pose 输入/输出，EE-mode 在节点内 IK 解算到关节后下发，保持向后兼容。",
+      "summary_en": "Extended the WebSocket protocol with depth input and dual-arm EE pose I/O; EE-mode actions are IK-resolved in-node to joint commands while staying byte-identical to legacy behavior when flags are off."
+    },
+    {
+      "date": "2026-05-19",
+      "category": "inference",
+      "title_zh": "Pi0.5 PyTorch 推理 5-backend benchmark",
+      "title_en": "Pi0.5 PyTorch 5-backend benchmark",
+      "summary_zh": "5090 上 max-autotune 实测 P50=43.5 ms / 8× vs eager，抖动 0.3 ms，确认无需自写 Triton。",
+      "summary_en": "Measured P50=43.5 ms on RTX 5090 with max-autotune (8× over eager, 0.3 ms jitter), confirming Triton hand-tuning is unnecessary."
+    },
+    {
+      "date": "2026-05-20",
+      "category": "inference",
+      "title_zh": "V1 Triton 复用推理路径落地",
+      "title_en": "V1 Triton inference path landed",
+      "summary_zh": "V1 Triton 5 kernel 复用 + 5090 重 autotune 把 PyTorch 推理 P50 推到 32 ms (8.0× vs eager)，数值对齐 rel error 1.42%。",
+      "summary_en": "Reused the V1 Triton kernel set and re-autotuned for RTX 5090, reaching P50=32 ms (8.0× over eager) with 1.42% relative error vs the JAX baseline."
+    },
+    {
+      "date": "2026-05-20",
+      "category": "data",
+      "title_zh": "DAgger 数据采集工具链就绪",
+      "title_en": "DAgger collection tooling ready",
+      "summary_zh": "ROS2 dagger_recorder_node 完成策略接管/对齐/录制状态机，Form A 纯人段输出与 kai0_dagger 同构。",
+      "summary_en": "Implemented dagger_recorder_node ROS2 state machine for takeover / align / record; Form-A pure-human segments are structurally identical to upstream kai0_dagger."
+    }
+  ]
+}

@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>deepdive_kai0 · Showcase</title>
+<style>
+:root {
+  --bg: #020010;
+  --bg2: #05001a;
+  --bg3: #0a0024;
+  --bg4: #0f002e;
+  --border: #1e1a6e;
+  --border2: #3730a3;
+  --text: #e8eaf6;
+  --text2: #8892c8;
+  --text3: #5a5e8c;
+  --accent: #7c3aed;
+  --accent2: #5b21b6;
+  --accent3: #a78bfa;
+  --glow: rgba(124,58,237,0.45);
+  --glow2: rgba(167,139,250,0.25);
+  --green: #22c55e;
+  --red: #ef4444;
+  --yellow: #eab308;
+  --blue: #818cf8;
+  --grid-color: rgba(80,40,200,0.10);
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex; flex-direction: column; min-height: 100vh;
+  position: relative; overflow-x: hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+body::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(79,70,229,0.18) 0%, transparent 70%);
+}
+
+.header, .tab-bar, .main, .tab-content { position: relative; z-index: 1; }
+
+/* ─── Header ───────────────────────────────────────────────────────────── */
+.header {
+  background: rgba(5,0,22,0.85);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border2);
+  box-shadow: 0 1px 0 0 rgba(124,58,237,0.3), 0 4px 24px rgba(0,0,0,0.5);
+  padding: 12px 20px;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; flex-shrink: 0;
+}
+.header .logo-wrap {
+  display: flex; align-items: center; gap: 10px;
+}
+.header h1 {
+  font-size: 17px; font-weight: 700; letter-spacing: 0.04em;
+  background: linear-gradient(90deg, #a78bfa 0%, #ddd6fe 45%, #818cf8 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  filter: drop-shadow(0 0 8px rgba(167,139,250,0.5));
+}
+.header .subtitle {
+  color: rgba(167,139,250,0.5); font-weight: 400; font-size: 13px; margin-left: 4px;
+}
+.header .lang-bar {
+  position: absolute; right: 20px;
+  display: inline-flex; border: 1px solid var(--border);
+  border-radius: 6px; overflow: hidden;
+  font-family: monospace; font-size: 11px;
+}
+.header .lang-bar button {
+  padding: 5px 12px; border: none; cursor: pointer;
+  background: transparent; color: var(--text2);
+  font-family: inherit; font-size: inherit;
+  transition: all 0.15s;
+}
+.header .lang-bar button + button { border-left: 1px solid var(--border); }
+.header .lang-bar button.active {
+  background: rgba(167,139,250,0.15); color: var(--accent3);
+}
+.header .lang-bar button:hover:not(.active) { color: var(--accent3); }
+
+.header .repo-link {
+  position: absolute; left: 20px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 700; color: var(--accent3);
+  background: rgba(109,40,217,0.15);
+  border: 1px solid rgba(167,139,250,0.35);
+  border-radius: 4px; padding: 3px 10px;
+  letter-spacing: 0.12em; font-family: monospace; text-decoration: none;
+  transition: all 0.15s;
+}
+.header .repo-link:hover {
+  background: rgba(109,40,217,0.25);
+  border-color: var(--accent3);
+}
+
+/* ─── Tab Bar ──────────────────────────────────────────────────────────── */
+.tab-bar {
+  background: rgba(5,0,22,0.7);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  display: flex; gap: 4px;
+  flex-shrink: 0;
+}
+.tab-bar .tab-btn {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text2);
+  font-size: 13px; font-weight: 500; letter-spacing: 0.02em;
+  padding: 14px 20px;
+  position: relative;
+  font-family: inherit;
+  transition: color 0.15s;
+}
+.tab-bar .tab-btn:hover { color: var(--accent3); }
+.tab-bar .tab-btn.active { color: var(--accent3); }
+.tab-bar .tab-btn.active::after {
+  content: ''; position: absolute; left: 20px; right: 20px; bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent3), var(--blue));
+  box-shadow: 0 0 12px var(--glow);
+}
+
+/* ─── Tab content ──────────────────────────────────────────────────────── */
+.tab-content { display: none; flex: 1; overflow-y: auto; }
+.tab-content.active { display: flex; flex-direction: column; }
+
+.sub-container {
+  max-width: 1200px; width: 100%;
+  margin: 0 auto;
+  padding: 28px 24px;
+  flex: 1;
+}
+
+.section-tag {
+  font-family: monospace; font-size: 9px; letter-spacing: 0.25em;
+  color: var(--accent3); text-transform: uppercase;
+  margin-bottom: 4px; opacity: 0.6;
+}
+.section-title {
+  font-size: 22px; font-weight: 700;
+  background: linear-gradient(90deg,#a78bfa,#818cf8);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  margin: 0 0 20px;
+}
+.section-desc {
+  color: var(--text2); font-size: 14px; line-height: 1.7;
+  margin-bottom: 28px; max-width: 800px;
+}
+
+/* ─── Overview hero ────────────────────────────────────────────────────── */
+.hero {
+  display: grid; grid-template-columns: 2fr 1fr; gap: 24px;
+  margin-bottom: 32px;
+}
+.hero-card {
+  background: rgba(15,0,46,0.4);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  position: relative;
+}
+.hero-card.glow {
+  background: linear-gradient(135deg, rgba(124,58,237,0.08), rgba(91,33,182,0.04));
+  border-color: rgba(167,139,250,0.3);
+  box-shadow: 0 0 40px rgba(124,58,237,0.08);
+}
+.stats-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;
+}
+.stat-item {
+  background: rgba(5,0,22,0.5);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  text-align: center;
+}
+.stat-value {
+  font-size: 28px; font-weight: 700;
+  background: linear-gradient(135deg, var(--accent3), var(--blue));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  font-family: monospace;
+}
+.stat-label {
+  font-size: 11px; color: var(--text2);
+  margin-top: 4px; letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.arch-diagram {
+  background: rgba(5,0,22,0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 28px;
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 11px; line-height: 1.5;
+  color: var(--text2);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+/* ─── Capabilities (feature matrix) ────────────────────────────────────── */
+.cat-tabs {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin-bottom: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.cat-tab {
+  background: rgba(15,0,46,0.4);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.cat-tab:hover {
+  background: rgba(124,58,237,0.1);
+  color: var(--accent3);
+}
+.cat-tab.active {
+  background: rgba(124,58,237,0.2);
+  border-color: var(--accent3);
+  color: var(--accent3);
+}
+.cat-tab .count {
+  margin-left: 6px;
+  font-family: monospace;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.feature-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 16px;
+}
+.feature-card {
+  background: rgba(15,0,46,0.4);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px;
+  transition: all 0.2s;
+}
+.feature-card:hover {
+  border-color: var(--accent3);
+  background: rgba(15,0,46,0.6);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(124,58,237,0.12);
+}
+.feature-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 8px; margin-bottom: 8px;
+}
+.feature-title {
+  font-size: 14px; font-weight: 600; color: var(--text);
+  line-height: 1.4;
+}
+.status-badge {
+  font-family: monospace; font-size: 9px; font-weight: 700;
+  padding: 2px 8px; border-radius: 3px;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+}
+.status-badge.DONE {
+  background: rgba(34,197,94,0.15); color: var(--green);
+  border: 1px solid rgba(34,197,94,0.3);
+}
+.status-badge.IN-PROGRESS {
+  background: rgba(234,179,8,0.15); color: var(--yellow);
+  border: 1px solid rgba(234,179,8,0.3);
+}
+.status-badge.PLANNED {
+  background: rgba(129,140,248,0.15); color: var(--blue);
+  border: 1px solid rgba(129,140,248,0.3);
+}
+.feature-summary {
+  font-size: 12px; color: var(--text2);
+  line-height: 1.6; margin-bottom: 12px;
+}
+.feature-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  font-size: 11px; color: var(--text3);
+  font-family: monospace;
+}
+.feature-docs {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.doc-pill {
+  display: inline-flex; align-items: center;
+  font-size: 10px; padding: 2px 7px;
+  background: rgba(124,58,237,0.1); color: var(--accent3);
+  border: 1px solid rgba(124,58,237,0.2);
+  border-radius: 3px;
+  cursor: pointer; transition: all 0.15s;
+  font-family: monospace;
+}
+.doc-pill:hover {
+  background: rgba(124,58,237,0.2);
+  border-color: var(--accent3);
+}
+
+/* ─── Pipeline tab ─────────────────────────────────────────────────────── */
+.pipeline {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.pipe-stage {
+  background: rgba(15,0,46,0.4);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  position: relative;
+}
+.pipe-stage h3 {
+  font-size: 14px; color: var(--accent3); font-weight: 600;
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.pipe-stage h3 .pipe-num {
+  display: inline-block; width: 22px; height: 22px;
+  background: rgba(124,58,237,0.2);
+  border: 1px solid var(--accent3);
+  border-radius: 50%;
+  text-align: center; line-height: 20px;
+  font-family: monospace; font-size: 11px;
+}
+.pipe-stage ul {
+  list-style: none; padding: 0;
+}
+.pipe-stage li {
+  font-size: 12px; color: var(--text2);
+  padding: 6px 0; padding-left: 16px;
+  position: relative; line-height: 1.5;
+}
+.pipe-stage li::before {
+  content: '▸'; position: absolute; left: 0;
+  color: var(--accent3); opacity: 0.6;
+}
+
+/* ─── Timeline (in Overview) ───────────────────────────────────────────── */
+.timeline {
+  position: relative; padding-left: 24px;
+}
+.timeline::before {
+  content: ''; position: absolute;
+  left: 6px; top: 4px; bottom: 4px; width: 2px;
+  background: linear-gradient(180deg, var(--accent3), transparent);
+}
+.tl-item {
+  position: relative; padding: 10px 0 10px 16px;
+}
+.tl-item::before {
+  content: ''; position: absolute;
+  left: -22px; top: 16px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--glow);
+  border: 2px solid var(--bg);
+}
+.tl-date {
+  font-family: monospace; font-size: 10px;
+  color: var(--accent3); letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.tl-title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  margin-bottom: 4px;
+}
+.tl-summary {
+  font-size: 12px; color: var(--text2); line-height: 1.5;
+}
+
+/* ─── Docs tab ─────────────────────────────────────────────────────────── */
+.docs-layout {
+  display: grid; grid-template-columns: 260px 1fr;
+  gap: 20px;
+  height: 100%;
+  min-height: calc(100vh - 200px);
+}
+.docs-sidebar {
+  background: rgba(5,0,22,0.5);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  overflow-y: auto;
+}
+.docs-group { margin-bottom: 16px; }
+.docs-group h4 {
+  font-size: 10px; color: var(--accent3);
+  letter-spacing: 0.15em; text-transform: uppercase;
+  margin-bottom: 8px; font-family: monospace;
+}
+.docs-group ul { list-style: none; padding: 0; }
+.docs-group li {
+  font-size: 12px; color: var(--text2);
+  padding: 6px 10px; cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.1s;
+  margin-bottom: 2px;
+}
+.docs-group li:hover {
+  background: rgba(124,58,237,0.1);
+  color: var(--accent3);
+}
+.docs-group li.active {
+  background: rgba(124,58,237,0.2);
+  color: var(--accent3);
+}
+.docs-viewer {
+  background: rgba(5,0,22,0.5);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  overflow-y: auto;
+  min-height: 100%;
+}
+.docs-viewer .placeholder {
+  color: var(--text3); font-size: 13px; text-align: center; padding: 60px 20px;
+}
+
+/* ─── Markdown content ─────────────────────────────────────────────────── */
+.md-content {
+  color: var(--text); line-height: 1.7;
+  font-size: 14px;
+}
+.md-content h1, .md-content h2, .md-content h3, .md-content h4 {
+  margin: 24px 0 12px; color: var(--accent3); font-weight: 600;
+}
+.md-content h1 {
+  font-size: 22px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg,#a78bfa,#ddd6fe);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.md-content h2 { font-size: 18px; }
+.md-content h3 { font-size: 15px; color: var(--text); }
+.md-content h4 { font-size: 13px; color: var(--text2); }
+.md-content p { margin-bottom: 12px; color: var(--text2); }
+.md-content ul, .md-content ol { margin: 10px 0 14px 24px; }
+.md-content li { margin-bottom: 6px; color: var(--text2); }
+.md-content code {
+  background: rgba(124,58,237,0.1);
+  color: var(--accent3);
+  padding: 1px 6px; border-radius: 3px;
+  font-family: 'SF Mono', Consolas, monospace; font-size: 12px;
+}
+.md-content pre {
+  background: rgba(5,0,22,0.8);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px; overflow-x: auto;
+  margin: 12px 0;
+}
+.md-content pre code {
+  background: transparent; color: var(--text);
+  padding: 0; font-size: 12px;
+}
+.md-content blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 4px 14px; margin: 12px 0;
+  background: rgba(124,58,237,0.05);
+  color: var(--text2);
+  font-style: italic;
+}
+.md-content a { color: var(--accent3); text-decoration: none; }
+.md-content a:hover { text-decoration: underline; }
+.md-content table {
+  border-collapse: collapse; margin: 12px 0;
+  font-size: 12px; width: 100%;
+}
+.md-content th, .md-content td {
+  border: 1px solid var(--border);
+  padding: 6px 10px; text-align: left;
+}
+.md-content th {
+  background: rgba(124,58,237,0.1);
+  color: var(--accent3);
+}
+.md-content hr {
+  border: none; border-top: 1px solid var(--border);
+  margin: 20px 0;
+}
+.md-content img { max-width: 100%; border-radius: 4px; }
+
+/* ─── Scrollbar ────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent2); }
+
+/* ─── Responsive ───────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .hero { grid-template-columns: 1fr; }
+  .pipeline { grid-template-columns: 1fr; }
+  .docs-layout { grid-template-columns: 1fr; }
+  .header .repo-link { display: none; }
+  .feature-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ─── Header ──────────────────────────────────────────────────────────── -->
+<div class="header">
+  <a class="repo-link" href="https://github.com/" target="_blank" rel="noopener" data-i18n="repo_link">DEEPDIVE_KAI0</a>
+  <div class="logo-wrap">
+    <svg width="22" height="24" viewBox="0 0 22 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;filter:drop-shadow(0 0 6px rgba(167,139,250,0.7))">
+      <polygon points="11,1 21,6.5 21,17.5 11,23 1,17.5 1,6.5" stroke="#818cf8" stroke-width="1.5" fill="rgba(109,40,217,0.18)"/>
+      <polygon points="11,5 17,8.5 17,15.5 11,19 5,15.5 5,8.5" stroke="#a78bfa" stroke-width="1" fill="rgba(109,40,217,0.1)"/>
+      <circle cx="11" cy="12" r="2.5" fill="#a78bfa" opacity="0.9"/>
+    </svg>
+    <h1>deepdive_kai0<span class="subtitle" data-i18n="header_sub">· π0.5 双臂操作部署</span></h1>
+  </div>
+  <div class="lang-bar">
+    <button id="lang-zh" class="active" onclick="setLang('zh')">中文</button>
+    <button id="lang-en" onclick="setLang('en')">EN</button>
+  </div>
+</div>
+
+<!-- ─── Tab Bar ─────────────────────────────────────────────────────────── -->
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')" data-i18n="tab_overview">概览</button>
+  <button class="tab-btn" data-tab="capabilities" onclick="switchTab('capabilities')" data-i18n="tab_capabilities">能力矩阵</button>
+  <button class="tab-btn" data-tab="pipeline" onclick="switchTab('pipeline')" data-i18n="tab_pipeline">端到端管线</button>
+  <button class="tab-btn" data-tab="docs" onclick="switchTab('docs')" data-i18n="tab_docs">文档</button>
+</div>
+
+<!-- ─── Tab: Overview ───────────────────────────────────────────────────── -->
+<div class="tab-content active" id="tab-overview">
+  <div class="sub-container">
+    <div class="section-tag">PROJECT · OVERVIEW</div>
+    <h2 class="section-title" data-i18n="ov_title">deepdive_kai0 — π0.5 双臂操作部署</h2>
+    <p class="section-desc" data-i18n="ov_desc">
+      基于 Physical Intelligence 开源的 π0.5 视觉-语言-动作模型，在 Agilex 双 Piper 机械臂 +
+      三路 RealSense 相机平台上的端到端部署项目。覆盖训练数据采集 (遥操作 / DAgger /
+      autonomy 回放) → 多机训练集群 (gf / uc / js) → 单工控机一体推理 (sim01) →
+      实时机械臂控制的完整闭环。
+    </p>
+
+    <div class="hero">
+      <div class="hero-card glow">
+        <div class="section-tag">PROJECT STATS</div>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value" id="stat-features">—</div>
+            <div class="stat-label" data-i18n="stat_features">已交付功能</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="stat-milestones">—</div>
+            <div class="stat-label" data-i18n="stat_milestones">里程碑</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="stat-docs">—</div>
+            <div class="stat-label" data-i18n="stat_docs">部署文档</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="stat-categories">—</div>
+            <div class="stat-label" data-i18n="stat_categories">能力分类</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-card">
+        <div class="section-tag">TECH STACK</div>
+        <ul style="list-style:none;padding:0;font-size:12px;color:var(--text2);line-height:1.9;">
+          <li><strong style="color:var(--accent3);">Model:</strong> π0.5 (flow matching, JAX + PyTorch)</li>
+          <li><strong style="color:var(--accent3);">Vision:</strong> PaliGemma + Gemma action expert</li>
+          <li><strong style="color:var(--accent3);">Sim:</strong> ROS2 Jazzy + rclpy</li>
+          <li><strong style="color:var(--accent3);">Hardware:</strong> Agilex Piper × 2 + RealSense × 3</li>
+          <li><strong style="color:var(--accent3);">Format:</strong> LeRobot v2.1</li>
+          <li><strong style="color:var(--accent3);">Transport:</strong> Volcano TOS object storage</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-tag" style="margin-top:32px;">SYSTEM · ARCHITECTURE</div>
+    <h3 style="font-size:16px;color:var(--accent3);margin-bottom:14px;" data-i18n="arch_title">系统架构</h3>
+    <div class="arch-diagram">┌─────────────────────────────────────────────────────────────────────────┐
+│                    deepdive_kai0  ·  end-to-end stack                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌──────────────┐    LeRobot v2.1     ┌─────────────────────────────┐   │
+│  │ Data Collect │ ──── parquet  ───▶  │   gf / uc / js  clusters    │   │
+│  │ teleop /     │   + 3-cam mp4       │   8 nodes A100/A800         │   │
+│  │ DAgger       │  + episodes.jsonl   │   JAX / PyTorch training    │   │
+│  └──────────────┘                     └──────────────┬──────────────┘   │
+│        ▲                                             │                  │
+│        │                                             ▼                  │
+│        │              ┌──────────────────────────────────────────────┐  │
+│        │              │  TOS object storage (~85 MB/s single file)   │  │
+│        │              │  ckpts · datasets · norm_stats               │  │
+│        │              └──────────────────────┬───────────────────────┘  │
+│        │                                     ▼                          │
+│        │              ┌──────────────────────────────────────────────┐  │
+│        │              │  sim01  ·  Ubuntu 24.04  ·  2 × RTX 5090     │  │
+│        │              │  ┌────────────────────────────────────────┐  │  │
+│        │              │  │  Python 3.12 unified venv              │  │  │
+│        │              │  │   JAX  +  PyTorch  +  ROS2 Jazzy       │  │  │
+│        │              │  │   ckpts:  sidecar config + norm_stats  │  │  │
+│        │              │  │   policy_inference_node  →  /master/*  │  │  │
+│        │              │  │   Rerun viz (GPU 1) · RTC · IK         │  │  │
+│        │              │  └──────────────────┬─────────────────────┘  │  │
+│        │              └─────────────────────│────────────────────────┘  │
+│        │                                    ▼                           │
+│        │                    ┌──────────────────────────┐                │
+│        │                    │  4 × CAN  +  3 × USB RS  │                │
+│        │                    └────────────┬─────────────┘                │
+│        │                                 ▼                              │
+│        │                ┌────────────────────────────────┐              │
+│        └────────────────┤   Agilex Piper × 2  +  3 cams  │              │
+│                         └────────────────────────────────┘              │
+└─────────────────────────────────────────────────────────────────────────┘</div>
+
+    <div class="section-tag" style="margin-top:32px;">RECENT · MILESTONES</div>
+    <h3 style="font-size:16px;color:var(--accent3);margin-bottom:14px;" data-i18n="ms_title">最近里程碑</h3>
+    <div class="timeline" id="timeline"></div>
+  </div>
+</div>
+
+<!-- ─── Tab: Capabilities ──────────────────────────────────────────────── -->
+<div class="tab-content" id="tab-capabilities">
+  <div class="sub-container">
+    <div class="section-tag">CAPABILITIES · MATRIX</div>
+    <h2 class="section-title" data-i18n="cap_title">能力矩阵</h2>
+    <p class="section-desc" data-i18n="cap_desc">
+      按 5 大类别梳理已交付的子系统能力。每张卡片标注完成日期 + 状态 + 关联文档。
+      点击文档徽章可在「文档」tab 直接打开对应说明。
+    </p>
+
+    <div class="cat-tabs" id="cat-tabs"></div>
+    <div class="feature-grid" id="feature-grid"></div>
+  </div>
+</div>
+
+<!-- ─── Tab: Pipeline ──────────────────────────────────────────────────── -->
+<div class="tab-content" id="tab-pipeline">
+  <div class="sub-container">
+    <div class="section-tag">END-TO-END · PIPELINE</div>
+    <h2 class="section-title" data-i18n="pipe_title">端到端管线</h2>
+    <p class="section-desc" data-i18n="pipe_desc">
+      从数据采集到真机执行的三大阶段。每个阶段列举本项目实现的关键子系统。
+    </p>
+
+    <div class="pipeline">
+      <div class="pipe-stage">
+        <h3><span class="pipe-num">1</span><span data-i18n="pipe_stage_collect">数据采集</span></h3>
+        <ul data-i18n-list="pipe_collect_items">
+          <li>Master-Slave 双臂遥操作 (4 路 CAN)</li>
+          <li>3 路 RealSense (1×D435 + 2×D405)</li>
+          <li>React + FastAPI 采集 UI</li>
+          <li>DAgger 在线纠错采集</li>
+          <li>Autonomy 自主回放记录</li>
+          <li>LeRobot v2.1 统一格式落盘</li>
+          <li>TOS 跨机增量同步</li>
+        </ul>
+      </div>
+      <div class="pipe-stage">
+        <h3><span class="pipe-num">2</span><span data-i18n="pipe_stage_train">模型训练</span></h3>
+        <ul data-i18n-list="pipe_train_items">
+          <li>gf 集群 (vePFS 共享)</li>
+          <li>uc 集群 (RoCEv2 多机)</li>
+          <li>js 集群 (200 Gb/s InfiniBand)</li>
+          <li>π0 / π0.5 / π0_fast / π0_rtc 变体</li>
+          <li>Sidecar config + override_asset_id</li>
+          <li>动态数据集 watcher 续训</li>
+          <li>norm_stats md5 一致性校验</li>
+        </ul>
+      </div>
+      <div class="pipe-stage">
+        <h3><span class="pipe-num">3</span><span data-i18n="pipe_stage_deploy">真机部署</span></h3>
+        <ul data-i18n-list="pipe_deploy_items">
+          <li>sim01 单机 一体推理 (双 RTX 5090)</li>
+          <li>ROS2-native policy node (JAX in-process)</li>
+          <li>稳态 66 ms / V1 Triton 路径 32 ms</li>
+          <li>RTC chunk-boundary 平滑</li>
+          <li>多模态: depth + EE pose I/O</li>
+          <li>动作安全限位 (URDF clamp)</li>
+          <li>Rerun 3D mesh 实时可视化</li>
+          <li>OBSERVE / EXECUTE 运行时切换</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Tab: Docs ───────────────────────────────────────────────────────── -->
+<div class="tab-content" id="tab-docs">
+  <div class="sub-container" style="max-width:1400px;">
+    <div class="section-tag">DOCUMENTATION · BROWSER</div>
+    <h2 class="section-title" data-i18n="docs_title">部署文档浏览器</h2>
+    <p class="section-desc" data-i18n="docs_desc">
+      24 份 docs/deployment 文档按主题分组。左侧选择，右侧渲染 markdown。
+    </p>
+
+    <div class="docs-layout">
+      <div class="docs-sidebar" id="docs-sidebar"></div>
+      <div class="docs-viewer">
+        <div id="doc-content" class="md-content">
+          <div class="placeholder" data-i18n="docs_placeholder">← 在左侧选择一份文档查看</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── External: marked.js for Markdown rendering ──────────────────────── -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="/static/i18n.js"></script>
+<script src="/static/app.js"></script>
+<script src="/static/feature_matrix.js"></script>
+<script src="/static/timeline.js"></script>
+<script src="/static/docs.js"></script>
+
+</body>
+</html>
