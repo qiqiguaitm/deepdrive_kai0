@@ -358,6 +358,30 @@ class PolicyInferenceNode(Node):
         self.policy = None
         self.stream_buffer = StreamActionBuffer(
             decay_alpha=self.decay_alpha, state_dim=14)
+
+        # B1 client-side latency profile (opt-in via KAI0_LATENCY_PROFILE=1).
+        # Writes one CSV row per inference cycle to /tmp/kai0_latency_<pid>.csv with
+        # 11 columns: cycle_idx, t_image_age_ms (camera-to-ros lag), t_obs_construct_ms,
+        # t_ws_full_rtt_ms (raw infer() call), t_ws_overhead_ms (= rtt - server_total),
+        # server_preproc/state/infer/post/total_ms (from result['policy_timing']),
+        # t_buffer_integrate_ms, t_loop_total_ms (incl all of above).
+        # When V1 serve is the backend, this gives the full end-to-end picture
+        # complementing server-side profile (B1 plan §7.3).
+        self._lat_profile_fp = None
+        self._lat_profile_cycle = 0
+        if os.environ.get("KAI0_LATENCY_PROFILE"):
+            try:
+                lat_path = f"/tmp/kai0_latency_{os.getpid()}.csv"
+                self._lat_profile_fp = open(lat_path, "w", buffering=1)  # line-buffered
+                self._lat_profile_fp.write(
+                    "cycle,t_image_age_ms,t_obs_construct_ms,t_ws_full_rtt_ms,t_ws_overhead_ms,"
+                    "server_preproc_ms,server_state_encode_ms,server_infer_ms,server_postproc_ms,"
+                    "server_total_ms,t_buffer_integrate_ms,t_loop_total_ms\n"
+                )
+                self.get_logger().info(f"B1 latency profile → {lat_path}")
+            except Exception as e:
+                self.get_logger().warn(f"B1 latency profile init failed: {e}")
+                self._lat_profile_fp = None
         # ── RTC state ──
         # _rtc_prev_chunk: last chunk returned by inference, sent as prev_action_chunk
         #   to the next call for chunk-boundary guidance. Reset to None on flush /
@@ -1813,6 +1837,62 @@ class PolicyInferenceNode(Node):
 
     # ── Inference loop ──────────────────────────────────────────────
 
+    # ── B1 latency profile helpers ──────────────────────────────────
+
+    def _record_latency_sample(
+        self, t_loop_start, t_obs_start, t_obs_end,
+        t_ws_send, t_ws_recv, t_buffer_done,
+        obs, result,
+    ):
+        """Write one CSV row capturing 11-segment client-side latency profile.
+
+        Segments (ms):
+            t_image_age           : ros now - latest image header.stamp
+            t_obs_construct       : t_obs_end - t_obs_start (_get_observation cost)
+            t_ws_full_rtt         : t_ws_recv - t_ws_send (raw infer() round-trip)
+            t_ws_overhead         : t_ws_full_rtt - server_total (= serialize+transit)
+            server_*              : from result["policy_timing"] (B1 server side)
+            t_buffer_integrate    : push chunk to stream_buffer
+            t_loop_total          : t_buffer_done - t_loop_start (incl all of above)
+        """
+        if self._lat_profile_fp is None:
+            return
+        try:
+            self._lat_profile_cycle += 1
+            # Image age: time since latest image was captured (header.stamp).
+            now_ros = self.get_clock().now()
+            img_age_ms = float('nan')
+            with self._sensor_lock:
+                if self._img_front_deque:
+                    latest_img = self._img_front_deque[-1]
+                    img_stamp = latest_img.header.stamp
+                    img_age_ns = (now_ros.nanoseconds
+                                  - (img_stamp.sec * 1_000_000_000 + img_stamp.nanosec))
+                    img_age_ms = img_age_ns / 1e6
+
+            pt = result.get('policy_timing', {}) if isinstance(result, dict) else {}
+            obs_construct_ms = (t_obs_end - t_obs_start) * 1000
+            ws_full_rtt_ms = (t_ws_recv - t_ws_send) * 1000
+            server_total_ms = float(pt.get('total_ms', 0.0))
+            ws_overhead_ms = ws_full_rtt_ms - server_total_ms
+            buffer_integrate_ms = (t_buffer_done - t_ws_recv) * 1000
+            loop_total_ms = (t_buffer_done - t_loop_start) * 1000
+
+            self._lat_profile_fp.write(
+                f"{self._lat_profile_cycle},"
+                f"{img_age_ms:.3f},{obs_construct_ms:.3f},"
+                f"{ws_full_rtt_ms:.3f},{ws_overhead_ms:.3f},"
+                f"{float(pt.get('preproc_ms', 0)):.3f},"
+                f"{float(pt.get('state_encode_ms', 0)):.3f},"
+                f"{float(pt.get('infer_ms', 0)):.3f},"
+                f"{float(pt.get('postproc_ms', 0)):.3f},"
+                f"{server_total_ms:.3f},"
+                f"{buffer_integrate_ms:.3f},{loop_total_ms:.3f}\n"
+            )
+        except Exception as e:
+            # Profiling MUST NOT break production inference; swallow + log warn.
+            self.get_logger().warn(f"latency profile write error: {e}")
+
     def _inference_loop(self):
         """Background thread: continuously infer and push to buffer."""
         # Wait for policy to be loaded
@@ -1867,10 +1947,12 @@ class PolicyInferenceNode(Node):
                 time.sleep(0.1)
                 continue
             try:
+                t_obs_start = time.monotonic()
                 obs = self._get_observation()
                 if obs is None:
                     time.sleep(0.01)
                     continue
+                t_obs_end = time.monotonic()
 
                 # ── RTC guidance payload ──
                 # Only inject when RTC is on AND we have a previous chunk. The
@@ -1912,9 +1994,11 @@ class PolicyInferenceNode(Node):
                         # becomes a tracer and breaks the `if mask_prefix_delay:`
                         # branch at pi0_rtc.py:323. Uses function default (False).
 
+                t_ws_send = time.monotonic()
                 result = self.policy.infer(obs)
+                t_ws_recv = time.monotonic()
                 actions = result.get('actions', None)
-                infer_ms = (time.monotonic() - t_start) * 1000
+                infer_ms = (t_ws_recv - t_start) * 1000
                 self._last_infer_ms = infer_ms
 
                 if actions is not None and len(actions) > 0:
@@ -1938,11 +2022,23 @@ class PolicyInferenceNode(Node):
                         self.get_logger().info(
                             '[REPLAY] discarding mid-flight policy chunk '
                             '(replay_mode flipped to replay during inference)')
+                        t_buffer_done = time.monotonic()
                     else:
                         self.stream_buffer.integrate_new_chunk(
                             actions,
                             max_k=self.latency_k,
                             min_m=self.min_smooth_steps)
+                        t_buffer_done = time.monotonic()
+
+                    # B1 latency profile sink (no-op when env var off).
+                    if self._lat_profile_fp is not None:
+                        self._record_latency_sample(
+                            t_loop_start=t_start,
+                            t_obs_start=t_obs_start, t_obs_end=t_obs_end,
+                            t_ws_send=t_ws_send, t_ws_recv=t_ws_recv,
+                            t_buffer_done=t_buffer_done,
+                            obs=obs, result=result,
+                        )
 
                     # Publish full chunk for rerun_viz to show predicted trajectory
                     try:
