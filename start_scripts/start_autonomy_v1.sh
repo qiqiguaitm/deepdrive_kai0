@@ -114,14 +114,14 @@ echo "[2/2] 包含: cameras + arms (slaves) + policy_inference_node (WS client)"
 PROFILE_ENV=""
 [ "$ENABLE_PROFILE" = "true" ] && PROFILE_ENV="KAI0_LATENCY_PROFILE=1"
 
-# autonomy_launch.py 用 mode=websocket + host + port 把 policy_inference 连到 V1 serve
+# start_autonomy.sh --ws-port 把 preflight check + autonomy_launch port 一起切到 V1 (:8002)
 env $PROFILE_ENV nohup "$REPO/start_scripts/start_autonomy.sh" \
     --mode websocket \
+    --ws-port "$PORT" \
     --execution-mode joint \
     $EXECUTE_FLAG \
     $RERUN_FLAG \
     "${EXTRA_AUTONOMY[@]}" \
-    -- host:=localhost port:=${PORT} \
     > "$AUTO_LOG" 2>&1 &
 PID_AUTO=$!
 PIDS+=($PID_AUTO)

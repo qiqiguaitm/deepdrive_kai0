@@ -35,6 +35,11 @@ EXECUTE_MODE="false"
 REPLAY="false"       # true = 走 playback_launch (回放数据 + rerun, 与 autonomy 同架构)
 SIM="false"          # true 仅在 REPLAY 下有意义 — 不驱动 CAN/真机
 EPISODE=""           # replay 模式必填: <task>/<subset>/<date>/<ep_id> 或绝对 parquet 路径
+# ── 扩展模态参数 (depth + EE pose) ──
+EXECUTION_MODE="joint"        # joint | ee_pose
+ENABLE_DEPTH_INPUT="false"
+ENABLE_EE_POSE_INPUT="false"
+WS_PORT="8000"                # preflight + autonomy_launch port (JAX :8000 / V1 :8002)
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -45,9 +50,19 @@ while [[ $# -gt 0 ]]; do
         --replay)     REPLAY="true"; shift ;;
         --sim)        SIM="true"; shift ;;
         --episode)    EPISODE="$2"; shift 2 ;;
+        --execution-mode)       EXECUTION_MODE="$2"; shift 2 ;;
+        --enable-depth-input)   ENABLE_DEPTH_INPUT="true"; shift ;;
+        --enable-ee-pose-input) ENABLE_EE_POSE_INPUT="true"; shift ;;
+        --ws-port)    WS_PORT="$2"; shift 2 ;;
+        --port)       WS_PORT="$2"; shift 2 ;;
         *)            EXTRA_ARGS+=("$1"); shift ;;
     esac
 done
+
+if [[ "$EXECUTION_MODE" != "joint" && "$EXECUTION_MODE" != "ee_pose" ]]; then
+    echo "[FAIL] --execution-mode must be 'joint' or 'ee_pose', got '$EXECUTION_MODE'" >&2
+    exit 1
+fi
 
 if [[ "$SIM" == "true" && "$REPLAY" != "true" ]]; then
     echo "[FAIL] --sim 必须配合 --replay 使用 (autonomy 默认就是真机, sim 仅适用于 replay)" >&2
@@ -236,15 +251,16 @@ if [[ "$REPLAY" != "true" ]]; then
         warn "calibration not found: $CALIB_FILE (FK visualization will be disabled)"
     fi
 
-    # serve_policy (websocket mode)
+    # serve_policy (websocket mode) — port follows --ws-port (default 8000=JAX, 8002=V1)
     if [ "$MODE" = "websocket" ] || [ "$MODE" = "both" ]; then
-        if ss -tlnp 2>/dev/null | grep -q ":8000 "; then
-            ok "serve_policy running on :8000"
+        if ss -tlnp 2>/dev/null | grep -q ":${WS_PORT} "; then
+            ok "serve_policy running on :${WS_PORT}"
         else
-            fail "serve_policy not running on :8000. Start it first:
-    cd $KAI0_DIR && CUDA_VISIBLE_DEVICES=1 JAX_COMPILATION_CACHE_DIR=/tmp/xla_cache \\
+            fail "serve_policy not running on :${WS_PORT}. Start it first:
+    JAX (:8000):  cd $KAI0_DIR && CUDA_VISIBLE_DEVICES=1 JAX_COMPILATION_CACHE_DIR=/tmp/xla_cache \\
       .venv/bin/python scripts/serve_policy.py --port 8000 policy:checkpoint \\
-      --policy.config=pi05_flatten_fold_normal --policy.dir=checkpoints/Task_A/mixed_1"
+      --policy.config=pi05_flatten_fold_normal --policy.dir=checkpoints/Task_A/mixed_1
+    V1 (:8002):   ./start_scripts/start_serve_v1.sh"
         fi
     fi
 fi
@@ -394,6 +410,7 @@ echo ""
 
 exec ros2 launch piper autonomy_launch.py \
     mode:="$MODE" \
+    port:="$WS_PORT" \
     enable_rerun:="$ENABLE_RERUN" \
     fg_enable:=false \
     bg_enable:=false \
@@ -401,4 +418,7 @@ exec ros2 launch piper autonomy_launch.py \
     gpu_id:="$GPU_ID" \
     config_name:=pi05_flatten_fold_normal \
     checkpoint_dir:="$KAI0_DIR/checkpoints/Task_A/mixed_1" \
+    execution_mode:="$EXECUTION_MODE" \
+    enable_depth_input:="$ENABLE_DEPTH_INPUT" \
+    enable_ee_pose_input:="$ENABLE_EE_POSE_INPUT" \
     "${EXTRA_ARGS[@]}"
