@@ -1110,9 +1110,25 @@ B4 (V1 serve 包装) ──→ 真机可跑 ──→ B1 (profile) ──→ B2 
 | Layer C3 与 QP 联动 | 阶段 2 (依赖 §3.3 #5) | QP 落地后 |
 | Layer C4 客户端 MPC | 阶段 5 (条件) | 真机测试 2 测出 t_motion > 50ms 才上 |
 
-### 7.2 B4 V1 serve 包装 (3-5 天, 主线)
+### 7.2 B4 V1 serve 包装 ✅ Phase 2 完成 (2026-05-20)
 
 **目标**: 把 §6 的 `Pi05InferenceTuned` 包装成 WebSocket 服务, ROS2 client 无感切换.
+
+#### 实测结果 (kai0/.venv_5090_trt 本机 smoke test, 5 iter Phase 2)
+
+| 段 | iter 2-5 平均 (ms) | 说明 |
+|---|---:|---|
+| **total** (server side) | **~40.5** | 含全部 5 段 |
+| preproc | 5.7-6.7 | PIL resize 224 + bf16 cast (B2 优化候选) |
+| state_encode | 0.3-0.4 | sentencepiece + PaliGemma embed lookup |
+| infer (V1 forward) | 34.0 | offline P50=32 + 2ms inference_mode/sync overhead |
+| postproc | 0.1-0.2 | action denorm + .cpu() |
+
+vs Q2 JAX 196ms: **4.9× 加速**已实现 (server side). 加 WebSocket + ROS2 transit (B1 待量化) 后客户端 RTT 估 ~50-55 ms (vs JAX 196 ms 仍 3.5-4× 加速).
+
+**State conditioning sanity check**: 切换 state ([0.5,-0.3,...] → [0,0,...]), action[0] max diff = 0.286 → state 编码确实流入 action.
+
+#### 实施步骤
 
 #### 步骤
 
@@ -1254,3 +1270,4 @@ t10 motor 响应           → t_motion (~50-150ms 估, §4.2 测试)
 | **v0.14** | **2026-05-20** | **Q2 sim01 JAX 推理延迟实测完成 + B4 Phase 1 serve_policy_v1.py 落地**: §4.1 加 1299-sample 实测表 (P50=196 ms / P95=221 / P99=232 / Std=13.2 / jitter=25 ms), 落在 "100-200ms 标准 5090 baseline" 档, 确认 V1 路径 6.1× 加速空间. JAX 抖动 P95-P50=25ms 不需 AOT compile. 推理 196ms vs timer 333ms = 59% utilization, V1 落地后可拉 inference_rate 到 20-30 Hz. 新增 `kai0/scripts/serve_policy_v1.py` (B4 Phase 1, 343 行) + `start_scripts/diag/measure_jax_infer_latency.sh` (Q2 helper) |
 | **v0.15** | **2026-05-20** | **§4.1 扩为正式实验报告 (8 子节)**: 4.1.1 测量方法 (含 policy_inference_node.py:2085-2148 timer 源码片段); 4.1.2 实验配置 (config / ckpt / asset_id / 硬件 / timer 等 9 项 metadata); 4.1.3 原始 log 样本 (前 5 条 + JIT outlier 标注); 4.1.4 分位数表; 4.1.5 **ASCII 分布直方图 9 bucket** (180-220 ms 集中 91%, 单峰窄分布 CV=6.6%, 无长尾); 4.1.6 V1 对比加 jitter / Std/Mean 行 + WebSocket overhead 补偿估算; 4.1.7 决策映射 4 行结论 (V1 路径✅ / AOT❌ / inference_rate 提升潜力⏳ / #6 价值低); 4.1.8 复跑命令. TOC 加 4.1 子节链接 |
 | **v0.16** | **2026-05-20** | **新增 §3.4.5 TensorRT 路径回顾**: 沉淀 TRT 攻关失败记录, 防止重复趟坑. 6 子节 A-F: A 已就绪资产 (`.venv_5090_trt` Python 3.10 + PyTorch 2.7.1+cu128 + TRT 10.14, `pi05_trt_pipeline.py` 367 行 5-stage 流水线, AOTI 6.3GB 产物); B **5 个阻塞点** (sm_120 / torch_tensorrt CUDA 13 / pypi hang / Python ABI / **未解 ONNX flow loop**); C AOTInductor Backend H 同期阻塞 (compile OK 但 load fail); D V1 §4.2.2 **8/8 优化已被 Inductor 自动捕获** (PyTorch 工具链 41ms 极限); E **4 条重启路径** (选 1 等 PyTorch 2.13 stable; 选 4 当前接受 V1 32ms); F 相关链接 6 个文件. TOC 加 3.4.5 子节链接 |
+| **v0.17** | **2026-05-20** | **B4 Phase 2 + B1 server-side profile 完成**: 实现 `SentencepieceStateEncoder` (kai0 同款 prefix `"Task: {p}, State: {s};\n"` + 256-bin 离散化 + PaliGemma embed lookup + scale√2048), 绕开 V1 prebaked language_embeds via `v1_forward_with_state()` 直写 encoder_x. 新增 `expand_v1_pkl_for_phase2.py` (扩 pkl `language_embeds` 7→200 行, 为 prompt+state 留位). V1Policy.infer() 加 5 段 timing (preproc / state_encode / infer / postproc / total). 本机 smoke test (5 iter): **total ~40.5 ms** (preproc 6 + state 0.3 + infer 34 + post 0.2), state 切换→action max diff 0.286 (验证 state 流入). vs Q2 JAX 196ms = **4.9× server-side speedup**. §7.2 加实测表 |
