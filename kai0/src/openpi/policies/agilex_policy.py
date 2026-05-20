@@ -118,8 +118,10 @@ class AgilexInputs(transforms.DataTransformFn):
         if "prompt" in data:
             inputs["prompt"] = data["prompt"]
         
-        # Advantage-estimator optional fields: passthrough or convert to tensor
-        for key in ("frame_index", "episode_length", "progress", "image_original", "episode_index"):
+        # Advantage-estimator optional fields + X-VLA soft prompt dataset_id passthrough.
+        # dataset_id must propagate to Pi0.embed_prefix to enable the soft_prompt_hub branch;
+        # without it grad_norm(soft_prompt_hub) stays zero across the whole run.
+        for key in ("frame_index", "episode_length", "progress", "image_original", "episode_index", "dataset_id"):
             if key in data:
                 inputs[key] = data[key]
         
